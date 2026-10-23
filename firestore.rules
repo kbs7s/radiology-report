@@ -68,6 +68,11 @@ service cloud.firestore {
       allow read, write: if isStaff();
     }
 
+    // Sentences learned from the site's own finished reports, one document per exam type
+    match /learned/{examType} {
+      allow read, write: if isStaff();
+    }
+
     // Report library chunks: uploaded by the doctor or an admin
     match /library/{doc} {
       allow read: if isStaff();

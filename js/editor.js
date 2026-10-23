@@ -1,7 +1,7 @@
 // Report editor: grey next-word / next-sentence suggestions from the report library, plus spelling help.
 
-const norm = (s) => s.toLowerCase().replace(/\s+/g, " ").replace(/\s+([.,;:])/g, "$1");
-const sentenceKey = (s) => norm(s).trim().replace(/\.$/, "");
+export const norm = (s) => s.toLowerCase().replace(/\s+/g, " ").replace(/\s+([.,;:])/g, "$1");
+export const sentenceKey = (s) => norm(s).trim().replace(/\.$/, "");
 export const escapeHtml = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // Library sentences are shown with their known misspellings already corrected

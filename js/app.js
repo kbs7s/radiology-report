@@ -2,7 +2,7 @@
 // Pages and wording follow the clinic's desktop program; the data lives in Firestore so several
 // people work at once, and the report editor adds sentence suggestions from the report library.
 import { createStore, LIBRARY_FILES } from "./store.js";
-import { createEditor, prepareLibrary } from "./editor.js";
+import { createEditor, prepareLibrary, norm, sentenceKey } from "./editor.js";
 import { AR } from "./i18n.js";
 import { SETTINGS, EXAM_TYPES, TEMPLATES, SNIPPETS } from "./defaults.js";
 
@@ -82,7 +82,7 @@ function textToHtml(text) {
 // ------------------------------------------------------------ state
 let store = null;
 const db = {
-  settings: { ...SETTINGS }, letterhead: {}, examTypes: EXAM_TYPES, snippets: SNIPPETS, templates: [], people: [],
+  settings: { ...SETTINGS }, letterhead: {}, examTypes: EXAM_TYPES, snippets: SNIPPETS, templates: [], people: [], learned: new Map(),
   exams: [], payments: [],
 };
 const live = { exams: new Map(), payments: new Map() };                       // window listeners
@@ -166,6 +166,7 @@ function startListeners() {
       if (!rows.length && !seeded && canWriteReport()) { seeded = true; TEMPLATES.forEach((t) => store.setDoc("templates", t.id, t).catch(console.error)); }
       liveUpdate();
     }, fail),
+    store.watchQuery("learned", {}, (rows) => { db.learned = new Map(rows.map((r) => [r._id, r])); }, fail),
     store.watchQuery("users", {}, (rows) => { db.people = rows.map((r) => ({ ...r, id: r._id })); liveUpdate(); }, fail),
     store.watchQuery("exams", { where: [["day", ">=", windowStart]] }, (rows) => {
       live.exams = new Map(rows.map((r) => [r._id, r])); rebuild(); onExamsChanged();
@@ -602,11 +603,81 @@ function pageEditor(id) {
 
 // Fixed values standing in for the select boxes the suggestion engine reads
 const fixedValue = (value) => ({ value, addEventListener() {} });
+// Exam names the library's region words do not cover
+const EXTRA_REGIONS = [[/kub|obstetric|pregnan|kidney|renal/, "Abdomen/Pelvis"], [/thyroid|neck/, "Neck"], [/breast/, "Chest"], [/thigh/, "Hip"]];
 function regionFor(name) {
   if (!lib) return "";
   const n = (name || "").toLowerCase();
   const regions = distinct(lib.titles.map((t) => t[2])).filter((r) => r !== "Other");
-  return regions.find((r) => r.toLowerCase().split("/").some((part) => n.includes(part.trim().slice(0, 5)))) || "";
+  return regions.find((r) => r.toLowerCase().split("/").some((part) => n.includes(part.trim().slice(0, 5))))
+    || (EXTRA_REGIONS.find(([re]) => re.test(n)) || [])[1] || "";
+}
+
+// Sentences that belong to another part of the same region, e.g. lumbar discs in a cervical spine report
+function foreignPattern(e) {
+  const n = (e.examName || "").toLowerCase(); const out = [];
+  if (/cervical/.test(n)) out.push(/\b[LSD]\d{1,2}\b|\bT\d{1,2}\b|lumb|sacr|dorsal|thoracic spine|conus/i);
+  if (/lumb|sacr/.test(n)) out.push(/\bC\d\b|cervical|dorsal|\bD\d{1,2}\b|cord compression at C/i);
+  if (/dorsal|thoracic/.test(n)) out.push(/\bC[2-7]\b|cervical|\bL[1-5]\b|lumb|sacr/i);
+  if (!e.contrast && !/contrast|mra|mrv/.test(n)) out.push(/enhanc|post[- ]?contrast|gadolinium|after (iv )?contrast/i);
+  if (/\bleft\b/.test(n)) out.push(/\bright\b/i);
+  if (/\bright\b/.test(n)) out.push(/\bleft\b/i);
+  return out.length ? new RegExp(out.map((r) => r.source).join("|"), "i") : null;
+}
+
+// The library seen by the editor for one exam: only sentences from reports of the same modality and
+// region, without sentences of other parts, with this exam's own past reports from the site first
+function examLibrary(e) {
+  if (!lib) return EMPTY_LIB;
+  const mod = LIB_MODALITY[e.modality] || ""; const region = regionFor(e.examName); const foreign = foreignPattern(e);
+  // A sentence counts for an exam when at least a quarter of its uses were in that modality and region
+  const share = (counts, key) => (counts[key] || 0) >= Math.max(1, 0.25 * Object.values(counts).reduce((a, n) => a + n, 0));
+  const fits = (p, useRegion) => (!mod || share(p.modalities, mod)) && (!useRegion || !region || share(p.regions, region)) && !(foreign && foreign.test(p.text));
+  let phrases = lib.phrases.filter((p) => fits(p, true));
+  if (phrases.length < 40) phrases = lib.phrases.filter((p) => fits(p, false));
+  const learned = db.learned.get(String(e.examTypeId)) || { phrases: [], next: [] };
+  const BOOST = 50;
+  const byKey = new Map(phrases.map((p) => [sentenceKey(p.text), { text: p.text, count: p.count, modalities: {}, regions: {} }]));
+  for (const [text, n] of learned.phrases || []) {
+    const k = sentenceKey(text); const had = byKey.get(k);
+    if (had) had.count += n * BOOST; else if (!(foreign && foreign.test(text))) byKey.set(k, { text, count: n * BOOST, modalities: {}, regions: {} });
+  }
+  const allowed = new Set(byKey.keys());
+  const learnedNext = new Map();
+  for (const [prev, text, n] of learned.next || []) (learnedNext.get(prev) || learnedNext.set(prev, []).get(prev)).push([text, n * BOOST]);
+  const next = new Proxy({}, { get: (_, key) => {
+    if (typeof key !== "string") return undefined;
+    const merged = new Map();
+    for (const [text, n] of [...(learnedNext.get(key) || []), ...(lib.next[key] || [])]) {
+      const k = sentenceKey(text); if (!allowed.has(k)) continue;
+      const had = merged.get(k); if (had) had[1] += n; else merged.set(k, [text, n]);
+    }
+    const list = [...merged.values()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+    return list.length ? list : undefined;
+  } });
+  return { ...lib, phrases: [...byKey.values()], next };
+}
+
+// A finished report teaches the library: its sentences, and which sentence follows which, are counted
+// for its exam type, once per exam (when it is signed or first printed)
+const splitSentences = (text) => String(text || "").split("\n").map((l) => l.trim()).filter(Boolean)
+  .flatMap((l) => l.replace(/^\s*(\d+[.)]|[-•*])\s+/, "").split(/(?<=[.;])\s+/)).map((x) => x.trim())
+  .filter((x) => x.length > 3 && !/^[A-Z][A-Z0-9 ,/&()'-]*:$/.test(x));
+async function learnReport(e) {
+  if (!e || e.learned || !e.examTypeId || !(e.report?.body || "").trim()) return;
+  const sents = splitSentences(e.report.body);
+  if (!sents.length) return;
+  const id = String(e.examTypeId);
+  await store.tx(async (t) => {
+    const cur = (await t.get("learned", id)) || { phrases: [], next: [] };
+    const ph = new Map((cur.phrases || []).map(([text, n]) => [sentenceKey(text), [text, n]]));
+    for (const x of sents) { const k = sentenceKey(x); const had = ph.get(k); if (had) had[1]++; else ph.set(k, [x, 1]); }
+    const nx = new Map((cur.next || []).map(([prev, text, n]) => [prev + "\u0001" + sentenceKey(text), [prev, text, n]]));
+    sents.slice(1).forEach((x, i) => { const prev = sentenceKey(sents[i]); const k = prev + "\u0001" + sentenceKey(x); const had = nx.get(k); if (had) had[2]++; else nx.set(k, [prev, x, 1]); });
+    const top = (m, idx, max) => [...m.values()].sort((a, b) => b[idx] - a[idx]).slice(0, max);
+    t.set("learned", id, { examTypeId: e.examTypeId, examName: e.examName, phrases: top(ph, 1, 2500), next: top(nx, 2, 4000), reports: (cur.reports || 0) + 1, updatedAt: nowIso() });
+    t.update("exams", e.id, { learned: true });
+  });
 }
 
 function mountEditor() {
@@ -616,8 +687,8 @@ function mountEditor() {
   ta.value = e.report?.body || "";
   if (!editing.ro) {
     editing.engine = createEditor({
-      lib: lib || EMPTY_LIB, editor: ta, mirror: $("#mirror"), suggList: $("#suggestions"), spellList: $("#spelling"),
-      modalitySel: fixedValue(LIB_MODALITY[e.modality] || ""), regionSel: fixedValue(regionFor(e.examName)),
+      lib: examLibrary(e), editor: ta, mirror: $("#mirror"), suggList: $("#suggestions"), spellList: $("#spelling"),
+      modalitySel: fixedValue(""), regionSel: fixedValue(""),
       ignored, onIgnore: (w) => { ignored.add(w); store.addWord(w).catch(console.error); },
       onInput: () => { autosize(); markDirty(); },
     });
@@ -1066,6 +1137,7 @@ const actions = {
   printReport(btn) {
     const e = examById(btn.dataset.id);
     updateExam(e.id, { printCount: (e.printCount || 0) + 1, printedAt: nowIso(), status: "printed" }).catch(console.error);
+    learnReport(e).catch(console.error);
     window.print();
   },
   async savePdf(btn) {
@@ -1108,6 +1180,7 @@ const actions = {
         status: "final",
       });
       editing = null; toast(T("Signed. The report is ready to print.")); go(`#/print/${e.id}`);
+      learnReport(examById(e.id)).catch(console.error);
     } catch (err) {
       btn.disabled = false; toast(T("Not saved: %(error)s", { error: err.code || err.message }));
     }
