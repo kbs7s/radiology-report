@@ -116,7 +116,7 @@ export function createEditor({ lib, editor, mirror, suggList, spellList, modalit
 
   function renderSuggestions() {
     if (!listItems.length) {
-      suggList.innerHTML = `<li class="empty">${editor.value.trim()
+      suggList.innerHTML = `<li class="empty" dir="auto">${editor.value.trim()
         ? "Type the start of a sentence, or finish one with a full stop."
         : "اختار نوع الفحص واضغط «ابدأ بقالب»."}</li>`;
       return;
@@ -136,13 +136,13 @@ export function createEditor({ lib, editor, mirror, suggList, spellList, modalit
     }
     const rows = [...seen.values()];
     if (!rows.length) {
-      spellList.innerHTML = `<li class="empty">No spelling issues found.</li>`;
+      spellList.innerHTML = `<li class="empty" dir="auto">No spelling issues found.</li>`;
       return;
     }
     const ignoreBtn = (r) => `<button type="button" class="mini" data-ignore="${escapeHtml(r.word.toLowerCase())}" title="الكلمة صحيحة، لا تنبهني عليها">صحيحة</button>`;
     spellList.innerHTML = rows.map((r) => r.fix
       ? `<li class="typo" data-word="${escapeHtml(r.word)}" data-fix="${escapeHtml(r.fix)}"><span><b>${escapeHtml(r.word)}</b> → ${escapeHtml(r.fix)}</span>${ignoreBtn(r)}</li>`
-      : `<li class="empty"><span><b>${escapeHtml(r.word)}</b> — not in the library</span>${ignoreBtn(r)}</li>`).join("");
+      : `<li class="empty" dir="auto"><span><b>${escapeHtml(r.word)}</b> — not in the library</span>${ignoreBtn(r)}</li>`).join("");
   }
 
   // Most frequent library word within two edits of an unknown word

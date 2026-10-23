@@ -30,7 +30,25 @@ const isRadiologist = () => store.user?.role === "radiologist";
 const roleLabel = () => ({ radiologist: "طبيب أشعة", reception: "استقبال", admin: "مدير", staff: "موظف" }[store.user?.role] || "موظف");
 const fmtDate = (d) => (d instanceof Date && !isNaN(d) ? d.toLocaleDateString("en-GB") : "");
 const fmtDateTime = (d) => (d instanceof Date && !isNaN(d) ? d.toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "");
-const setStatus = (t) => ($("status").textContent = t);
+const setStatus = (t) => { $("status").textContent = t; $("status").title = t; };
+// First letters of the first two words, skipping titles and brackets: "Dr. Sara Ali" → "SA"
+const initials = (name) => (name || "").split(/\s+/).filter((w) => !/^(dr|د)\.?$/i.test(w))
+  .map((w) => w.match(/\p{L}/u)?.[0]).filter(Boolean).slice(0, 2).join("");
+const SEX_LABEL = { Male: "ذكر", Female: "أنثى" };
+
+document.querySelectorAll(".clinic-name").forEach((e) => (e.textContent = clinic.name));
+
+// Phones show one column at a time: the patient list, or the open patient
+const narrow = matchMedia("(max-width: 899px)");
+const setView = (v) => { document.body.dataset.view = v; if (narrow.matches) window.scrollTo(0, 0); };
+// Sentence suggestions sit beside the editor on wide screens and just above it on phones
+function placeSuggestions() {
+  const panel = $("sugg-panel");
+  if (narrow.matches) $("sugg-slot").append(panel);
+  else $("assist").prepend(panel);
+}
+narrow.addEventListener("change", placeSuggestions);
+placeSuggestions();
 
 async function start() {
   store = await createStore();
@@ -40,7 +58,10 @@ async function start() {
       $("app-view").hidden = !user;
       if (unwatchList) { unwatchList(); unwatchList = null; }
       if (!user) return;
-      $("who").textContent = `${user.name} · ${roleLabel()}`;
+      document.body.dataset.role = user.role;
+      $("who-name").textContent = user.name;
+      $("who-role").textContent = roleLabel();
+      $("who-avatar").textContent = initials(user.name);
       $("upload-library").hidden = !isRadiologist();
       if (store.mode === "demo") setStatus("وضع تجريبي: التقارير محفوظة بهذا المتصفح فقط");
       await setupEditor();
@@ -75,7 +96,7 @@ async function setupEditor() {
     modalitySel: $("modality"), regionSel: $("region"),
     ignored,
     onIgnore: (w) => { ignored.add(w); store.addWord(w); },
-    onInput: markDirty,
+    onInput: () => { autosize(); markDirty(); },
   });
   showReport(current);
 }
@@ -87,8 +108,9 @@ function sumBy(titles, i) {
 }
 
 function fillSelect(sel, entries) {
-  sel.innerHTML = `<option value="">الكل</option>` +
-    entries.map(([v, n]) => `<option value="${escapeHtml(v)}">${escapeHtml(v)} (${n})</option>`).join("");
+  // Ordered by how often the exam appears in the library
+  sel.innerHTML = `<option value="">—</option>` +
+    entries.map(([v]) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
 }
 
 // ---------- Reports list ----------
@@ -99,22 +121,30 @@ function isToday(d) {
     d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
 }
 
+const fmtWhen = (d) => (isToday(d)
+  ? d.toLocaleTimeString("en-GB", { timeStyle: "short" })
+  : fmtDate(d));
+
 function renderList() {
+  const counts = { all: reports.length, today: 0, registered: 0, draft: 0, approved: 0 };
+  reports.forEach((r) => { counts[r.status] = (counts[r.status] || 0) + 1; if (isToday(r.createdAt)) counts.today++; });
+  document.querySelectorAll(".chip").forEach((c) => (c.querySelector(".n").textContent = counts[c.dataset.filter] || ""));
+
   const q = $("search").value.trim().toLowerCase();
   const rows = reports.filter((r) =>
     (filter === "all" || (filter === "today" ? isToday(r.createdAt) : r.status === filter)) &&
     (!q || `${r.patientName || ""} ${r.referringDoctor || ""} ${r.text || ""}`.toLowerCase().includes(q)));
   $("reports").innerHTML = rows.length ? rows.map((r) => {
-    const line = (r.text || "").split("\n")[0].trim() ||
-      [r.modality, r.region].filter(Boolean).join(" ") || "—";
+    const study = [r.modality, r.region].filter(Boolean).join(" · ") ||
+      (r.text || "").split("\n")[0].trim() || "—";
     return `
     <li data-id="${r.id}" class="${r.id === current.id ? "active" : ""}">
-      <div class="r-top"><b>${escapeHtml(r.patientName || "(بدون اسم)")}</b>
+      <div class="r-top"><b class="r-name" dir="auto">${escapeHtml(r.patientName || "(بدون اسم)")}</b>
         <span class="badge ${r.status}">${STATUS_LABEL[r.status] || r.status}</span></div>
-      <div class="r-title" dir="ltr">${escapeHtml(line.slice(0, 70))}</div>
-      <div class="r-meta">${fmtDateTime(r.updatedAt)} · ${escapeHtml(r.updatedByName || "")}</div>
+      <div class="r-study" dir="ltr">${escapeHtml(study.slice(0, 70))}</div>
+      <div class="r-meta">${fmtWhen(r.updatedAt)} · ${escapeHtml(r.updatedByName || "")}</div>
     </li>`;
-  }).join("") : `<li class="empty">ماكو تقارير</li>`;
+  }).join("") : `<li class="empty">${reports.length ? "ماكو نتائج بهذا البحث" : "ماكو مرضى بعد. اضغط «مريض جديد» حتى تبدي."}</li>`;
 }
 
 $("reports").addEventListener("click", async (e) => {
@@ -123,7 +153,9 @@ $("reports").addEventListener("click", async (e) => {
   await flushSave();
   const r = reports.find((x) => x.id === li.dataset.id);
   if (r) openReport(r);
+  setView("case");
 });
+$("back").addEventListener("click", () => setView("list"));
 $("search").addEventListener("input", renderList);
 document.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll(".chip").forEach((x) => x.classList.toggle("active", x === b));
@@ -138,6 +170,7 @@ $("new-report").addEventListener("click", async () => {
   showReport(current);
   $("f-date").value = new Date().toISOString().slice(0, 10);
   renderList();
+  setView("case");
   $("f-patient").focus();
 });
 
@@ -154,23 +187,57 @@ function openReport(r) {
 function showReport(r) {
   for (const [k, id] of Object.entries(FIELDS)) $(id).value = r[k] || "";
   editor?.setText(r.text || "");
+  autosize();
   $("remote-banner").hidden = true;
   pendingRemote = null;
+  // The doctor sees the patient summary in the header; reception works in the full form
+  $("patient-card").open = !isRadiologist() || !r.id || !r.patientName;
+  renderCaseHead();
   applyStatus(r);
 }
+
+// Header line: patient name, age/sex, study and referring doctor
+function renderCaseHead() {
+  const v = (id) => $(id).value.trim();
+  const name = v("f-patient");
+  $("case-title").textContent = name || (current.id ? "(بدون اسم)" : "مريض جديد");
+  $("case-avatar").textContent = initials(name);
+  const age = v("f-age") && `${v("f-age")} سنة`;
+  const study = [v("modality"), v("region")].filter(Boolean).join(" ");
+  const parts = [age, SEX_LABEL[v("f-sex")]].filter(Boolean).map(escapeHtml);
+  if (study) parts.push(`<bdi dir="ltr">${escapeHtml(study)}</bdi>`);
+  if (v("f-contrast") === "Contrast") parts.push("مع صبغة");
+  if (v("f-doctor")) parts.push(`محوّل من <bdi>${escapeHtml(v("f-doctor"))}</bdi>`);
+  $("case-meta").innerHTML = parts.map((x) => `<span class="m">${x}</span>`).join("");
+}
+
+// The report box grows with its text so the page scrolls, not the box
+function autosize() {
+  const e = $("editor"), wrap = e.parentElement;
+  wrap.style.minHeight = `${e.offsetHeight}px`; // keep the page height while measuring, so it does not jump
+  e.style.height = "auto";
+  e.style.height = `${e.scrollHeight}px`;
+  wrap.style.minHeight = "";
+}
+window.addEventListener("resize", autosize);
 
 function applyStatus(r) {
   const approved = r.status === "approved";
   const canEditReport = !approved && isRadiologist();   // only the doctor writes the report
   const canEditFields = !approved;                       // reception and doctor edit patient data
   $("editor").readOnly = !canEditReport;
+  $("editor").placeholder = canEditReport
+    ? "Start typing the report… (Tab accepts the grey suggestion)"
+    : approved ? "" : "بانتظار طبيب الأشعة لكتابة التقرير";
+  document.body.dataset.writing = canEditReport ? "1" : "0";
   Object.values(FIELDS).forEach((id) => ($(id).disabled = !canEditFields));
   $("template").disabled = !canEditReport;
   $("report-hint").hidden = approved || isRadiologist(); // shown to reception/others
   $("badge").className = `badge ${r.status}`;
-  $("badge").textContent = approved
-    ? `معتمد · ${r.approvedByName || ""} · ${fmtDate(r.approvedAt)}`
-    : (STATUS_LABEL[r.status] || r.status);
+  // <bdi> keeps the English name and date from reordering the Arabic label
+  $("badge").innerHTML = approved
+    ? `معتمد · <bdi>${escapeHtml(r.approvedByName || "")}</bdi> · <bdi>${fmtDate(r.approvedAt)}</bdi>`
+    : escapeHtml(STATUS_LABEL[r.status] || r.status);
   // Doctor can approve a report that has text; can re-open an approved one
   $("approve").hidden = approved || !isRadiologist();
   $("reopen").hidden = !approved || !isRadiologist();
@@ -258,6 +325,8 @@ async function flushSave() {
 Object.values(FIELDS).forEach((id) => {
   $(id).addEventListener("input", markDirty);
   $(id).addEventListener("change", markDirty); // selects fire change, not input
+  $(id).addEventListener("input", renderCaseHead);
+  $(id).addEventListener("change", renderCaseHead);
 });
 window.addEventListener("beforeunload", (e) => { if (current.dirty) { save(); e.preventDefault(); } });
 
@@ -270,9 +339,9 @@ $("template").addEventListener("click", () => {
 function confirmTwice(btn) {
   if (Date.now() - (+btn.dataset.armed || 0) < 3000) return true;
   btn.dataset.armed = Date.now();
-  const label = btn.textContent;
+  const label = btn.innerHTML; // keeps the button icon
   btn.textContent = "اضغط مرة ثانية للتأكيد";
-  setTimeout(() => (btn.textContent = label), 3000);
+  setTimeout(() => (btn.innerHTML = label), 3000);
   return false;
 }
 
