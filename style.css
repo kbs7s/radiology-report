@@ -206,15 +206,19 @@ button:disabled, input:disabled, select:disabled { opacity: 0.6; cursor: default
 .r-title { font-size: 0.78rem; color: var(--muted); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .r-meta { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
 
+/* Badges: registered (amber) → draft (blue) → approved (green) */
 .badge { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); white-space: nowrap; }
+.badge.draft { background: var(--accent-soft); color: var(--accent); }
 .badge.approved { background: #e6f4ea; color: #1e7b34; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .badge.approved { background: #17321f; color: #6fcf8a; } }
 :root[data-theme="dark"] .badge.approved { background: #17321f; color: #6fcf8a; }
 
 /* Patient fields */
-.patient { display: grid; grid-template-columns: 2fr 0.7fr 0.9fr 1.2fr 1.6fr; gap: 8px; }
+.patient { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 .patient label { display: grid; gap: 4px; font-size: 0.78rem; color: var(--muted); }
-@media (max-width: 760px) { .patient { grid-template-columns: 1fr 1fr; } .patient label:first-child { grid-column: 1 / -1; } }
+.patient label.wide { grid-column: 1 / -1; }
+@media (max-width: 760px) { .patient { grid-template-columns: 1fr 1fr; } }
+.report-hint { font-size: 0.82rem; color: var(--warn); background: var(--warn-soft); padding: 7px 10px; border-radius: 6px; margin: 0 0 8px; }
 .spacer { flex: 1; }
 .save-state { font-size: 0.78rem; color: var(--muted); }
 .banner {

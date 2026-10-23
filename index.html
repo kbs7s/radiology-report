@@ -57,10 +57,12 @@
       <!-- Reports list -->
       <aside class="list-col panel">
         <div class="list-head">
-          <button id="new-report" type="button">+ تقرير جديد</button>
+          <button id="new-report" type="button">+ مريض جديد</button>
           <input id="search" type="search" placeholder="بحث باسم المريض أو الفحص">
           <div class="filters" role="group">
             <button type="button" class="chip active" data-filter="all">الكل</button>
+            <button type="button" class="chip" data-filter="today">اليوم</button>
+            <button type="button" class="chip" data-filter="registered">بانتظار التقرير</button>
             <button type="button" class="chip" data-filter="draft">مسودة</button>
             <button type="button" class="chip" data-filter="approved">معتمد</button>
           </div>
@@ -81,13 +83,19 @@
           <label>الجنس
             <select id="f-sex"><option value=""></option><option value="Male">Male</option><option value="Female">Female</option></select>
           </label>
+          <label>الهاتف <input id="f-phone" type="tel" inputmode="tel" dir="ltr"></label>
           <label>تاريخ الفحص <input id="f-date" type="date"></label>
           <label>الطبيب المحيل <input id="f-doctor" type="text"></label>
+          <label>نوع الفحص <select id="modality"></select></label>
+          <label>المنطقة <select id="region"></select></label>
+          <label>الصبغة
+            <select id="f-contrast"><option value=""></option><option value="Native">بدون صبغة</option><option value="Contrast">مع صبغة</option></select>
+          </label>
+          <label>السعر <input id="f-price" type="text" inputmode="numeric" dir="ltr"></label>
+          <label class="wide">ملاحظات الاستقبال <input id="f-notes" type="text"></label>
         </div>
 
         <div class="toolbar">
-          <label>نوع الفحص <select id="modality"></select></label>
-          <label>المنطقة <select id="region"></select></label>
           <button id="template" type="button" class="ghost-btn">ابدأ بقالب</button>
           <span class="spacer"></span>
           <span id="save-state" class="save-state"></span>
@@ -96,6 +104,7 @@
           <button id="reopen" type="button" class="ghost-btn" hidden>إلغاء الاعتماد</button>
           <button id="pdf" type="button" class="ghost-btn">حفظ PDF</button>
         </div>
+        <p id="report-hint" class="report-hint" hidden>هذا التقرير يكتبه طبيب الأشعة. إنت مسجّل كموظف استقبال، تكدر تعدّل بيانات المريض بس.</p>
 
         <div class="editor-wrap" dir="ltr">
           <div id="mirror" class="editor mirror" aria-hidden="true"></div>

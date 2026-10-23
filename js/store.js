@@ -82,7 +82,7 @@ async function createFirebaseStore() {
       return id;
     }
     const ref = await fs.addDoc(reportsCol, {
-      ...fields, ...stamp(), status: "draft",
+      ...fields, ...stamp(), status: "registered",
       createdAt: fs.serverTimestamp(), createdBy: store.user.uid, createdByName: store.user.name,
     });
     return ref.id;
@@ -109,7 +109,9 @@ function createDemoStore() {
   const listeners = new Set();
   let reports = read(KEY, []).map((r) => ({ ...r, updatedAt: new Date(r.updatedAt), createdAt: new Date(r.createdAt), approvedAt: r.approvedAt && new Date(r.approvedAt) }));
   const emit = () => { write(KEY, reports); listeners.forEach((cb) => cb()); };
-  const user = { uid: "demo", email: "demo@local", name: "Demo Radiologist", role: "radiologist" };
+  // Demo mode can preview any role via ?role=reception|radiologist|staff
+  const demoRole = new URLSearchParams(location.search).get("role") || "radiologist";
+  const user = { uid: "demo", email: "demo@local", name: `Demo (${demoRole})`, role: demoRole };
   const sorted = () => [...reports].sort((a, b) => b.updatedAt - a.updatedAt);
 
   return {
@@ -142,7 +144,7 @@ function createDemoStore() {
         reports = reports.map((r) => (r.id === id ? { ...r, ...fields, updatedAt: now, updatedBy: user.uid, updatedByName: user.name } : r));
       } else {
         id = "r" + now.getTime();
-        reports.push({ id, ...fields, status: "draft", createdAt: now, updatedAt: now, createdBy: user.uid, createdByName: user.name, updatedBy: user.uid, updatedByName: user.name });
+        reports.push({ id, ...fields, status: "registered", createdAt: now, updatedAt: now, createdBy: user.uid, createdByName: user.name, updatedBy: user.uid, updatedByName: user.name });
       }
       emit();
       return id;

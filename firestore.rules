@@ -18,12 +18,15 @@ service cloud.firestore {
 
     match /reports/{id} {
       allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.status == 'draft'
+      // Reception (or anyone signed in) registers a patient: status registered or draft
+      allow create: if signedIn()
+        && request.resource.data.status in ['registered', 'draft']
         && request.resource.data.createdBy == request.auth.uid;
-      // Drafts can be edited by any user; approving, un-approving and editing approved reports is radiologist-only
+      // Any signed-in user may edit a record that is not approved; only the radiologist
+      // may approve, edit an approved report, or re-open it
       allow update: if signedIn() && (
         isRadiologist() ||
-        (resource.data.status == 'draft' && request.resource.data.status == 'draft')
+        (resource.data.status != 'approved' && request.resource.data.status != 'approved')
       );
       allow delete: if isRadiologist();
     }

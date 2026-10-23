@@ -4,7 +4,13 @@ import { createEditor, prepareLibrary, escapeHtml } from "./editor.js";
 import { clinic } from "../firebase-config.js";
 
 const $ = (id) => document.getElementById(id);
-const FIELDS = { patientName: "f-patient", age: "f-age", sex: "f-sex", examDate: "f-date", referringDoctor: "f-doctor" };
+// Patient/exam fields filled at reception. The report text itself is written only by the doctor.
+const FIELDS = {
+  patientName: "f-patient", age: "f-age", sex: "f-sex", phone: "f-phone",
+  examDate: "f-date", referringDoctor: "f-doctor", modality: "modality", region: "region",
+  contrast: "f-contrast", price: "f-price", notes: "f-notes",
+};
+const STATUS_LABEL = { registered: "بانتظار التقرير", draft: "مسودة", approved: "معتمد" };
 const SAVE_DELAY = 1200;
 
 let store, editor;
@@ -16,10 +22,12 @@ let saveTimer = null, saving = null, pendingRemote = null;
 const ignored = new Set();
 
 function blankReport() {
-  return { id: null, status: "draft", dirty: false };
+  return { id: null, status: "registered", dirty: false };
 }
 
+// Only the doctor (radiologist) writes and approves the report; reception and others fill patient data
 const isRadiologist = () => store.user?.role === "radiologist";
+const roleLabel = () => ({ radiologist: "طبيب أشعة", reception: "استقبال", admin: "مدير", staff: "موظف" }[store.user?.role] || "موظف");
 const fmtDate = (d) => (d instanceof Date && !isNaN(d) ? d.toLocaleDateString("en-GB") : "");
 const fmtDateTime = (d) => (d instanceof Date && !isNaN(d) ? d.toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "");
 const setStatus = (t) => ($("status").textContent = t);
@@ -32,7 +40,7 @@ async function start() {
       $("app-view").hidden = !user;
       if (unwatchList) { unwatchList(); unwatchList = null; }
       if (!user) return;
-      $("who").textContent = `${user.name}${user.role === "radiologist" ? " · أخصائي" : ""}`;
+      $("who").textContent = `${user.name} · ${roleLabel()}`;
       $("upload-library").hidden = !isRadiologist();
       if (store.mode === "demo") setStatus("وضع تجريبي: التقارير محفوظة بهذا المتصفح فقط");
       await setupEditor();
@@ -85,17 +93,28 @@ function fillSelect(sel, entries) {
 
 // ---------- Reports list ----------
 
+function isToday(d) {
+  const n = new Date();
+  return d instanceof Date && !isNaN(d) &&
+    d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+}
+
 function renderList() {
   const q = $("search").value.trim().toLowerCase();
-  const rows = reports.filter((r) => (filter === "all" || r.status === filter) &&
-    (!q || `${r.patientName || ""} ${r.text || ""}`.toLowerCase().includes(q)));
-  $("reports").innerHTML = rows.length ? rows.map((r) => `
+  const rows = reports.filter((r) =>
+    (filter === "all" || (filter === "today" ? isToday(r.createdAt) : r.status === filter)) &&
+    (!q || `${r.patientName || ""} ${r.referringDoctor || ""} ${r.text || ""}`.toLowerCase().includes(q)));
+  $("reports").innerHTML = rows.length ? rows.map((r) => {
+    const line = (r.text || "").split("\n")[0].trim() ||
+      [r.modality, r.region].filter(Boolean).join(" ") || "—";
+    return `
     <li data-id="${r.id}" class="${r.id === current.id ? "active" : ""}">
       <div class="r-top"><b>${escapeHtml(r.patientName || "(بدون اسم)")}</b>
-        <span class="badge ${r.status}">${r.status === "approved" ? "معتمد" : "مسودة"}</span></div>
-      <div class="r-title" dir="ltr">${escapeHtml((r.text || "").split("\n")[0].slice(0, 70))}</div>
+        <span class="badge ${r.status}">${STATUS_LABEL[r.status] || r.status}</span></div>
+      <div class="r-title" dir="ltr">${escapeHtml(line.slice(0, 70))}</div>
       <div class="r-meta">${fmtDateTime(r.updatedAt)} · ${escapeHtml(r.updatedByName || "")}</div>
-    </li>`).join("") : `<li class="empty">ماكو تقارير</li>`;
+    </li>`;
+  }).join("") : `<li class="empty">ماكو تقارير</li>`;
 }
 
 $("reports").addEventListener("click", async (e) => {
@@ -134,8 +153,6 @@ function openReport(r) {
 
 function showReport(r) {
   for (const [k, id] of Object.entries(FIELDS)) $(id).value = r[k] || "";
-  $("modality").value = r.modality || "";
-  $("region").value = r.region || "";
   editor?.setText(r.text || "");
   $("remote-banner").hidden = true;
   pendingRemote = null;
@@ -144,12 +161,17 @@ function showReport(r) {
 
 function applyStatus(r) {
   const approved = r.status === "approved";
-  const locked = approved;
-  $("editor").readOnly = locked;
-  Object.values(FIELDS).forEach((id) => ($(id).disabled = locked));
-  $("template").disabled = locked;
+  const canEditReport = !approved && isRadiologist();   // only the doctor writes the report
+  const canEditFields = !approved;                       // reception and doctor edit patient data
+  $("editor").readOnly = !canEditReport;
+  Object.values(FIELDS).forEach((id) => ($(id).disabled = !canEditFields));
+  $("template").disabled = !canEditReport;
+  $("report-hint").hidden = approved || isRadiologist(); // shown to reception/others
   $("badge").className = `badge ${r.status}`;
-  $("badge").textContent = approved ? `معتمد · ${r.approvedByName || ""} · ${fmtDate(r.approvedAt)}` : "مسودة";
+  $("badge").textContent = approved
+    ? `معتمد · ${r.approvedByName || ""} · ${fmtDate(r.approvedAt)}`
+    : (STATUS_LABEL[r.status] || r.status);
+  // Doctor can approve a report that has text; can re-open an approved one
   $("approve").hidden = approved || !isRadiologist();
   $("reopen").hidden = !approved || !isRadiologist();
   editor?.refresh();
@@ -189,7 +211,7 @@ $("remote-load").addEventListener("click", () => {
 
 function collect() {
   const f = Object.fromEntries(Object.entries(FIELDS).map(([k, id]) => [k, $(id).value.trim()]));
-  return { ...f, modality: $("modality").value, region: $("region").value, text: editor.getText() };
+  return { ...f, text: editor.getText() };
 }
 
 function markDirty() {
@@ -208,13 +230,17 @@ async function save() {
   current.dirty = false;
   $("save-state").textContent = "جارٍ الحفظ…";
   const wasNew = !current.id;
-  saving = store.saveReport(current.id, fields).then((id) => {
+  saving = store.saveReport(current.id, fields).then(async (id) => {
     Object.assign(current, fields, { id });
-    $("save-state").textContent = `محفوظ ${new Date().toLocaleTimeString("en-GB", { timeStyle: "short" })}`;
-    if (wasNew) {
-      unwatchReport = store.watchReport(id, onRemoteChange);
-      renderList();
+    // Once the doctor has written report text, move it from "awaiting report" to "draft"
+    if (current.status === "registered" && isRadiologist() && fields.text.trim()) {
+      await store.setStatus(id, "draft");
+      current.status = "draft";
+      applyStatus(current);
     }
+    $("save-state").textContent = `محفوظ ${new Date().toLocaleTimeString("en-GB", { timeStyle: "short" })}`;
+    if (wasNew) unwatchReport = store.watchReport(id, onRemoteChange);
+    renderList();
   }).catch((err) => {
     current.dirty = true;
     $("save-state").textContent = "فشل الحفظ، راح أعيد المحاولة";
@@ -229,9 +255,10 @@ async function flushSave() {
   else if (saving) await saving;
 }
 
-Object.values(FIELDS).forEach((id) => $(id).addEventListener("input", markDirty));
-$("modality").addEventListener("change", markDirty);
-$("region").addEventListener("change", markDirty);
+Object.values(FIELDS).forEach((id) => {
+  $(id).addEventListener("input", markDirty);
+  $(id).addEventListener("change", markDirty); // selects fire change, not input
+});
 window.addEventListener("beforeunload", (e) => { if (current.dirty) { save(); e.preventDefault(); } });
 
 $("template").addEventListener("click", () => {
@@ -252,6 +279,7 @@ function confirmTwice(btn) {
 // ---------- Approval ----------
 
 $("approve").addEventListener("click", async () => {
+  if (!editor.getText().trim()) { setStatus("ماكو نص تقرير حتى يتعتمد"); return; }
   if (!confirmTwice($("approve"))) return;
   current.dirty = true;
   await save();
@@ -259,6 +287,7 @@ $("approve").addEventListener("click", async () => {
   await store.setStatus(current.id, "approved");
   Object.assign(current, { status: "approved", approvedByName: store.user.name, approvedAt: new Date() });
   applyStatus(current);
+  renderList();
 });
 
 $("reopen").addEventListener("click", async () => {
@@ -298,7 +327,8 @@ $("pdf").addEventListener("click", async () => {
       <header><div class="clinic">${escapeHtml(clinic.name)}</div><div class="sub">${escapeHtml(clinic.subtitle)}</div></header>
       <table class="pt">
         <tr><th>Patient</th><td>${escapeHtml(f.patientName)}</td><th>Date</th><td>${escapeHtml(f.examDate)}</td></tr>
-        <tr><th>Age / Sex</th><td>${escapeHtml([f.age, f.sex].filter(Boolean).join(" / "))}</td><th>Referred by</th><td>${escapeHtml(f.referringDoctor)}</td></tr>
+        <tr><th>Age / Sex</th><td>${escapeHtml([f.age, f.sex].filter(Boolean).join(" / "))}</td><th>Phone</th><td>${escapeHtml(f.phone)}</td></tr>
+        <tr><th>Referred by</th><td>${escapeHtml(f.referringDoctor)}</td><th>Study</th><td>${escapeHtml([f.modality, f.contrast === "Contrast" ? "with contrast" : f.contrast === "Native" ? "non-contrast" : ""].filter(Boolean).join(", "))}</td></tr>
       </table>
       <div class="body">${reportHtml(f.text)}</div>
       <footer>${approved
