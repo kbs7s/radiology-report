@@ -3,15 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0e7490">
+  <meta name="theme-color" content="#0d6e69">
   <title>تقارير الأشعة</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230e7490'/%3E%3Cpath d='M9 13v-2a2 2 0 0 1 2-2h2M19 9h2a2 2 0 0 1 2 2v2M23 19v2a2 2 0 0 1-2 2h-2M13 23h-2a2 2 0 0 1-2-2v-2' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='16' r='3' fill='white'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230d6e69'/%3E%3Cpath d='M9 13v-2a2 2 0 0 1 2-2h2M19 9h2a2 2 0 0 1 2 2v2M23 19v2a2 2 0 0 1-2 2h-2M13 23h-2a2 2 0 0 1-2-2v-2' stroke='white' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='16' r='3' fill='white'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Almarai:wght@400;700;800&display=swap">
   <link rel="stylesheet" href="style.css">
+  <style id="page-css"></style>
 </head>
-<body data-view="list">
+<body>
   <!-- Visible error banner: surfaces any load/runtime error so a blank page never hides the cause -->
   <div id="fatal" style="display:none;position:fixed;inset:0;z-index:9999;background:#2a0d0d;color:#ffd7d7;
     font:14px/1.6 monospace;padding:24px;overflow:auto;direction:ltr;white-space:pre-wrap"></div>
@@ -24,7 +25,9 @@
           "\n\nإذا تقدر، افتح Console بالمتصفح وصوّر الرسالة الحمراء.";
       }
       window.addEventListener("error", function (e) {
-        show((e.message || "error") + (e.filename ? "\n" + e.filename + ":" + e.lineno : ""));
+        // Errors from extensions or cross-origin scripts carry no detail and are not ours
+        if (!e.filename || e.filename.indexOf(location.origin) !== 0) return;
+        show((e.message || "error") + "\n" + e.filename + ":" + e.lineno);
       });
       window.addEventListener("unhandledrejection", function (e) {
         var r = e.reason;
@@ -33,163 +36,12 @@
     })();
   </script>
 
-  <!-- Icons -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-    <symbol id="i-logo" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.5"/></symbol>
-    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
-    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
-    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 21h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-4M8 17l-5-5 5-5M3 12h12"/></symbol>
-    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
-    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
-    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
-    <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></symbol>
-    <symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
-    <symbol id="i-back" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
-    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
-    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15v4M17 17h4"/></symbol>
-    <symbol id="i-spell" viewBox="0 0 24 24"><path d="m3 18 4-12 4 12M4.4 14h5.2M14 15l2.5 2.5L21 12"/></symbol>
-    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
-  </svg>
+  <div id="root"><div class="boot">جارٍ التحميل…</div></div>
 
-  <!-- Login -->
-  <section id="login-view" class="login" hidden>
-    <form id="login-form" class="login-card">
-      <div class="login-brand">
-        <span class="logo lg"><svg class="ic"><use href="#i-logo"/></svg></span>
-        <h1>تقارير الأشعة</h1>
-        <p class="clinic-name"></p>
-      </div>
-      <label class="field">البريد الإلكتروني <input id="login-email" type="email" autocomplete="username" required dir="ltr"></label>
-      <label class="field">كلمة السر <input id="login-password" type="password" autocomplete="current-password" required dir="ltr"></label>
-      <button type="submit" class="btn btn-primary btn-block">دخول</button>
-      <p id="login-error" class="error" role="alert"></p>
-      <p class="login-foot">الدخول مخصص لموظفي القسم فقط</p>
-    </form>
-  </section>
+  <input type="file" id="image-file" accept="image/*" hidden>
+  <input type="file" id="library-files" accept=".json,application/json" multiple hidden>
 
-  <!-- App -->
-  <div id="app-view" hidden>
-    <header class="topbar">
-      <div class="brand">
-        <span class="logo"><svg class="ic"><use href="#i-logo"/></svg></span>
-        <div class="brand-text"><b>تقارير الأشعة</b><span class="clinic-name"></span></div>
-      </div>
-      <span id="status" class="status-pill">جارٍ تحميل المكتبة…</span>
-      <div class="topbar-actions">
-        <label id="upload-library" class="btn btn-ghost" title="رفع ملفات المكتبة" hidden>
-          <svg class="ic"><use href="#i-upload"/></svg><span class="hide-sm">رفع المكتبة</span>
-          <input id="library-files" type="file" accept=".json" multiple hidden>
-        </label>
-        <div class="user-chip">
-          <span id="who-avatar" class="avatar"></span>
-          <span class="user-text"><b id="who-name"></b><span id="who-role"></span></span>
-        </div>
-        <button id="signout" type="button" class="btn btn-ghost btn-icon" title="خروج" aria-label="خروج"><svg class="ic"><use href="#i-logout"/></svg></button>
-      </div>
-    </header>
-
-    <main class="layout">
-      <!-- Worklist -->
-      <aside class="worklist card">
-        <div class="worklist-head">
-          <h2>قائمة المرضى</h2>
-          <button id="new-report" type="button" class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>مريض جديد</button>
-        </div>
-        <div class="search">
-          <svg class="ic"><use href="#i-search"/></svg>
-          <input id="search" type="search" placeholder="بحث بالاسم أو الطبيب أو النص">
-        </div>
-        <div class="filters" role="group" aria-label="تصفية القائمة">
-          <button type="button" class="chip active" data-filter="all">الكل <span class="n"></span></button>
-          <button type="button" class="chip" data-filter="today">اليوم <span class="n"></span></button>
-          <button type="button" class="chip" data-filter="registered">بانتظار التقرير <span class="n"></span></button>
-          <button type="button" class="chip" data-filter="draft">مسودة <span class="n"></span></button>
-          <button type="button" class="chip" data-filter="approved">معتمد <span class="n"></span></button>
-        </div>
-        <ul id="reports" class="reports"></ul>
-      </aside>
-
-      <!-- Patient case: details + report -->
-      <section class="case">
-        <div class="case-head card">
-          <button id="back" type="button" class="btn btn-ghost btn-icon back" aria-label="رجوع للقائمة"><svg class="ic"><use href="#i-back"/></svg></button>
-          <span id="case-avatar" class="avatar avatar-lg"></span>
-          <div class="case-id">
-            <h2 id="case-title" dir="auto">مريض جديد</h2>
-            <p id="case-meta" class="case-meta"></p>
-          </div>
-          <div class="case-state">
-            <span id="save-state" class="save-state"></span>
-            <span id="badge" class="badge"></span>
-          </div>
-        </div>
-
-        <div id="remote-banner" class="banner" hidden>
-          <span id="remote-text"></span>
-          <button id="remote-load" type="button" class="mini">اعرض النسخة الجديدة</button>
-        </div>
-
-        <details id="patient-card" class="card patient-card" open>
-          <summary><span>بيانات المريض والفحص</span><svg class="ic chev"><use href="#i-chevron"/></svg></summary>
-          <div class="patient">
-            <p class="group-title">المريض</p>
-            <label class="span2">اسم المريض <input id="f-patient" type="text" dir="auto" autocomplete="off"></label>
-            <label>العمر <input id="f-age" type="text" inputmode="numeric" autocomplete="off"></label>
-            <label>الجنس
-              <select id="f-sex"><option value="">—</option><option value="Male">ذكر</option><option value="Female">أنثى</option></select>
-            </label>
-            <label class="span2">الهاتف <input id="f-phone" type="tel" inputmode="tel" dir="ltr" autocomplete="off"></label>
-            <label class="span2">الطبيب المحيل <input id="f-doctor" type="text" dir="auto" autocomplete="off"></label>
-
-            <p class="group-title">الفحص</p>
-            <label>تاريخ الفحص <input id="f-date" type="date"></label>
-            <label>نوع الفحص <select id="modality"></select></label>
-            <label>المنطقة <select id="region"></select></label>
-            <label>الصبغة
-              <select id="f-contrast"><option value="">—</option><option value="Native">بدون صبغة</option><option value="Contrast">مع صبغة</option></select>
-            </label>
-            <label>السعر <input id="f-price" type="text" inputmode="numeric" dir="ltr" autocomplete="off"></label>
-            <label class="span3">ملاحظات الاستقبال <input id="f-notes" type="text" dir="auto" autocomplete="off"></label>
-          </div>
-        </details>
-
-        <div class="card report-card">
-          <div class="report-bar">
-            <h3>التقرير</h3>
-            <button id="template" type="button" class="btn btn-ghost btn-sm writer-only"><svg class="ic"><use href="#i-doc"/></svg>ابدأ بقالب</button>
-            <span class="spacer"></span>
-            <button id="pdf" type="button" class="btn btn-ghost"><svg class="ic"><use href="#i-download"/></svg>PDF</button>
-            <button id="reopen" type="button" class="btn btn-ghost" hidden><svg class="ic"><use href="#i-unlock"/></svg>إلغاء الاعتماد</button>
-            <button id="approve" type="button" class="btn btn-success" hidden><svg class="ic"><use href="#i-check"/></svg>اعتماد التقرير</button>
-          </div>
-          <p id="report-hint" class="note" hidden><svg class="ic"><use href="#i-info"/></svg>
-            <span>نص التقرير يكتبه طبيب الأشعة. إنت مسجّل كموظف استقبال، تكدر تعدّل بيانات المريض والفحص بس.</span></p>
-          <div id="sugg-slot"></div>
-          <div class="editor-wrap" dir="ltr">
-            <div id="mirror" class="editor mirror" aria-hidden="true"></div>
-            <textarea id="editor" class="editor" spellcheck="false" autocomplete="off"
-              placeholder="Start typing the report… (Tab accepts the grey suggestion)"></textarea>
-          </div>
-          <p class="hint writer-only">اضغط <kbd>Tab</kbd> لقبول الاقتراح الرمادي، و<kbd>Esc</kbd> لإخفائه. على الموبايل اضغط على الجملة من القائمة.</p>
-        </div>
-      </section>
-
-      <!-- Writing assistance (radiologist) -->
-      <aside id="assist" class="assist">
-        <section id="sugg-panel" class="card assist-card">
-          <h2><svg class="ic"><use href="#i-spark"/></svg>الجمل المقترحة</h2>
-          <ul id="suggestions" class="list" dir="ltr"></ul>
-        </section>
-        <section class="card assist-card">
-          <h2><svg class="ic"><use href="#i-spell"/></svg>تصحيح الكلمات</h2>
-          <ul id="spelling" class="list" dir="ltr"></ul>
-        </section>
-      </aside>
-    </main>
-  </div>
-
-  <div id="pdf-host" aria-hidden="true"></div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <script type="module" src="js/main.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" defer></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>

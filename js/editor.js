@@ -6,10 +6,11 @@ export const escapeHtml = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&
 
 // Library sentences are shown with their known misspellings already corrected
 export function prepareLibrary(lib) {
+  // Also puts back the space lost after a full stop in old reports ("normal.No evidence")
   const fix = (t) => t.replace(/[A-Za-z][A-Za-z'\-]*/g, (w) => {
     const c = lib.typos[w.toLowerCase()];
     return c ? (w === w.toUpperCase() ? c.suggest.toUpperCase() : c.suggest) : w;
-  });
+  }).replace(/([a-z]{2})\.([A-Z][a-z])/g, "$1. $2");
   lib.phrases.forEach((p) => (p.text = fix(p.text)));
   Object.values(lib.next).forEach((list) => list.forEach((n) => (n[0] = fix(n[0]))));
   lib.titles = lib.titles.map(([t, m, g, n]) => [fix(t), m, g, n]);
@@ -244,6 +245,7 @@ export function createEditor({ lib, editor, mirror, suggList, spellList, modalit
   return {
     refresh,
     template,
+    insert: insertAtCaret,
     getText: () => editor.value,
     setText(text) {
       editor.value = text || "";

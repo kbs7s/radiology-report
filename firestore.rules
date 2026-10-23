@@ -1,45 +1,94 @@
 rules_version = '2';
 
 // Paste into Firebase console → Firestore Database → Rules, then Publish.
+// Everything needs a signed-in account whose users/{uid} document has a role:
+//   reception   registers patients, takes payments, prints signed reports
+//   typist      also writes report drafts
+//   radiologist (shown as "Doctor") also signs and reopens reports, and manages settings
+//   admin       manages settings and people, writes drafts, cannot sign
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function isRadiologist() {
-      return signedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'radiologist';
+    function myProfile() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasRole(roles) {
+      return signedIn() && exists(myProfile()) && get(myProfile()).data.get('role', '') in roles;
     }
+    function isStaff() { return hasRole(['reception', 'typist', 'radiologist', 'admin']); }
+    function canWrite() { return hasRole(['typist', 'radiologist', 'admin']); }
+    function isManager() { return hasRole(['radiologist', 'admin']); }
+    function isDoctor() { return hasRole(['radiologist']); }
 
-    // User profiles {name, role} are created by hand in the console
+    // People: each person can read their own profile; the doctor or an admin adds people and sets roles
     match /users/{uid} {
-      allow read: if signedIn();
-      allow write: if false;
+      allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
+      allow write: if isManager();
     }
 
-    match /reports/{id} {
-      allow read: if signedIn();
-      // Reception (or anyone signed in) registers a patient: status registered or draft
-      allow create: if signedIn()
-        && request.resource.data.status in ['registered', 'draft']
-        && request.resource.data.createdBy == request.auth.uid;
-      // Any signed-in user may edit a record that is not approved; only the radiologist
-      // may approve, edit an approved report, or re-open it
-      allow update: if signedIn() && (
-        isRadiologist() ||
-        (resource.data.status != 'approved' && request.resource.data.status != 'approved')
-      );
-      allow delete: if isRadiologist();
-    }
-
-    // Report library chunks: read by everyone signed in, uploaded by the radiologist
-    match /library/{doc} {
-      allow read: if signedIn();
-      allow write: if isRadiologist();
-    }
-
-    // Shared dictionary of words marked as correct
+    // Clinic, letterhead, exam types and prices: the doctor or an admin
     match /settings/{doc} {
-      allow read, write: if signedIn();
+      allow read: if isStaff();
+      allow write: if isManager();
+    }
+    // Quick text: whoever writes reports
+    match /settings/snippets {
+      allow write: if canWrite();
+    }
+    // Words marked as correct by the spelling help: everyone
+    match /settings/dictionary {
+      allow write: if isStaff();
+    }
+
+    // Sequential numbers for patients, exams and receipts (changed inside transactions)
+    match /meta/counters {
+      allow read, write: if isStaff();
+    }
+
+    match /patients/{id} {
+      allow read, create, update: if isStaff();
+      allow delete: if false;
+    }
+
+    match /exams/{id} {
+      function before() { return resource.data; }
+      function after() { return request.resource.data; }
+      function changed() { return after().diff(before()).affectedKeys(); }
+      function wasSigned() { return before().status in ['final', 'printed']; }
+
+      allow read: if isStaff();
+      allow create: if isStaff() && after().status == 'waiting' && after().report == null;
+      // The doctor may do anything. Everyone else: never signs, never reopens a signed report,
+      // never changes the text of a signed report; reception never changes the report at all.
+      allow update: if isDoctor() || (isStaff()
+        && after().status in ['waiting', 'draft', 'final', 'printed', 'cancelled']
+        && (after().status != 'final' || before().status == 'final')
+        && (!wasSigned() || after().status in ['final', 'printed'])
+        && (!wasSigned() || !('report' in changed()))
+        && (canWrite() || !('report' in changed())));
+      allow delete: if false;
+    }
+
+    // Payments and refunds are only ever added, by the person taking the money
+    match /payments/{id} {
+      allow read: if isStaff();
+      allow create: if isStaff() && request.resource.data.byUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /templates/{id} {
+      allow read: if isStaff();
+      allow write: if canWrite();
+    }
+
+    // Report library chunks: uploaded by the doctor or an admin
+    match /library/{doc} {
+      allow read: if isStaff();
+      allow write: if isManager();
+    }
+
+    // Reports from the earlier version of the site, kept read-only
+    match /reports/{id} {
+      allow read: if isStaff();
+      allow write: if false;
     }
   }
 }
