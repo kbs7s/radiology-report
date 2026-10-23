@@ -27,15 +27,20 @@ const setStatus = (t) => ($("status").textContent = t);
 async function start() {
   store = await createStore();
   store.onAuth(async (user) => {
-    $("login-view").hidden = !!user;
-    $("app-view").hidden = !user;
-    if (unwatchList) { unwatchList(); unwatchList = null; }
-    if (!user) return;
-    $("who").textContent = `${user.name}${user.role === "radiologist" ? " · أخصائي" : ""}`;
-    $("upload-library").hidden = !isRadiologist();
-    if (store.mode === "demo") setStatus("وضع تجريبي: التقارير محفوظة بهذا المتصفح فقط");
-    await setupEditor();
-    unwatchList = store.watchReports((list) => { reports = list; renderList(); });
+    try {
+      $("login-view").hidden = !!user;
+      $("app-view").hidden = !user;
+      if (unwatchList) { unwatchList(); unwatchList = null; }
+      if (!user) return;
+      $("who").textContent = `${user.name}${user.role === "radiologist" ? " · أخصائي" : ""}`;
+      $("upload-library").hidden = !isRadiologist();
+      if (store.mode === "demo") setStatus("وضع تجريبي: التقارير محفوظة بهذا المتصفح فقط");
+      await setupEditor();
+      unwatchList = store.watchReports((list) => { reports = list; renderList(); });
+    } catch (err) {
+      console.error(err);
+      setStatus(`خطأ: ${err.code || err.message}`);
+    }
   });
 }
 

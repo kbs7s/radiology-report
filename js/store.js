@@ -17,13 +17,26 @@ async function createFirebaseStore() {
   ]);
   const app = initializeApp(firebaseConfig);
   const a = auth.getAuth(app);
-  const db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache() });
+  // Offline cache fails on some mobile browsers / private windows; fall back to the default in-memory store
+  let db;
+  try {
+    db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache() });
+  } catch (err) {
+    console.error("persistent cache unavailable", err);
+    db = fs.getFirestore(app);
+  }
   const store = { mode: "firebase", user: null };
 
   store.onAuth = (cb) => auth.onAuthStateChanged(a, async (u) => {
     if (!u) { store.user = null; return cb(null); }
-    const profile = await fs.getDoc(fs.doc(db, "users", u.uid));
-    const p = profile.exists() ? profile.data() : {};
+    // A missing or unreadable profile should still sign the user in (as staff), never hang on a blank screen
+    let p = {};
+    try {
+      const profile = await fs.getDoc(fs.doc(db, "users", u.uid));
+      if (profile.exists()) p = profile.data();
+    } catch (err) {
+      console.error("profile read failed", err);
+    }
     store.user = { uid: u.uid, email: u.email, name: p.name || u.email, role: p.role || "staff" };
     cb(store.user);
   });
