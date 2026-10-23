@@ -41,6 +41,7 @@ const EMPTY_LIB = { phrases: [], next: {}, ngrams: {}, vocab: {}, typos: {}, tit
 const LIB_MODALITY = { MRI: "MRI", CT: "CT", US: "US", XR: "" };
 
 function toast(text) {
+  document.querySelectorAll(".toast").forEach((t) => t.remove());
   const el = document.createElement("div");
   el.className = "toast"; el.textContent = text; document.body.append(el);
   setTimeout(() => el.remove(), 2600);
@@ -114,7 +115,8 @@ const meName = () => me()?.name || T("Unknown");
 const role = () => me()?.role || "";
 const isDoctor = () => role() === "radiologist";
 const canManage = () => role() === "admin" || role() === "radiologist";
-const canWriteReport = () => ["radiologist", "typist", "admin"].includes(role());
+// Everyone with a role writes and edits reports, including reception; only the doctor signs
+const canWriteReport = () => !!ROLES[role()];
 const distinct = (values) => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
 const newestFirst = (a, b) => b.registeredAt.localeCompare(a.registeredAt);
 
@@ -222,6 +224,7 @@ function busy() {
 function liveUpdate() {
   if (!store?.user) return;
   renderBanner();
+  if (page() === "register" && $("#today-list")) { $("#today-list").innerHTML = todayList(); $("#today-count").textContent = db.exams.filter((e) => e.day === today() && e.status !== "cancelled").length; }
   if (!LIVE_PAGES.has(page())) return;
   if (busy()) { stale = true; return; }
   render(true);
@@ -232,9 +235,14 @@ document.addEventListener("focusout", () => setTimeout(() => {
 
 // ------------------------------------------------------------ layout
 const NAV = [
-  ["#/", "Today's worklist"], ["#/register", "Register patient"], ["#/search", "Search reports"],
-  ["#/cash", "Cash"], ["#/stats", "Stats"], ["#/settings", "Settings"],
+  ["#/", "Today's worklist", "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"],
+  ["#/register", "Register patient", "M15 19a6 6 0 0 0-12 0M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6"],
+  ["#/search", "Search reports", "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-4.3-4.3"],
+  ["#/cash", "Cash", "M3 7h18v12H3zM3 11h18M7 15h3"],
+  ["#/stats", "Stats", "M4 20V10M10 20V4M16 20v-7M22 20H2"],
+  ["#/settings", "Settings", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"],
 ];
+const icon = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 function shell(content) {
   const path = location.hash.split("?")[0] || "#/";
   const s = db.settings; const m = me();
@@ -243,7 +251,7 @@ function shell(content) {
     <nav class="nav no-print">
       <div class="brand"><div class="brand-mark">${esc((s.nameAr || s.nameEn || "R").slice(0, 1))}</div>
         <div><strong>${esc(s.nameEn)}</strong>${s.nameAr ? `<small>${esc(s.nameAr)}</small>` : ""}</div></div>
-      <div class="links">${nav.map(([h, label]) => `<a href="${h}" class="${path === h || (h === "#/" && path === "#") ? "on" : ""}">${T(label)}</a>`).join("")}</div>
+      <div class="links">${nav.map(([h, label, ic]) => `<a href="${h}" class="${path === h || (h === "#/" && path === "#") ? "on" : ""}">${icon(ic)}<span>${T(label)}</span></a>`).join("")}</div>
       <div class="grow"></div>
       <div class="me">
         <div class="who"><span class="label">${T("Signed in as")}</span><strong><bdi>${esc(m.name)}</bdi></strong><span class="sub">${ROLES[m.role] ? T(ROLES[m.role]) : "—"}</span></div>
@@ -285,18 +293,26 @@ function pageWorklist(q) {
   const link = (k, v) => { const n = new URLSearchParams(q); v ? n.set(k, v) : n.delete(k); return "#/?" + n; };
   const action = (e) => e.status === "cancelled" ? ""
     : isSigned(e) ? `<a href="#/print/${e.id}">${e.status === "printed" ? T("Reprint") : T("Print")}</a>`
-    : !canWriteReport() ? `<a href="#/exam/${e.id}">${T("Details")}</a>`
     : `<a href="#/report/${e.id}">${e.status === "waiting" ? T("Write report") : T("Continue")}</a>`;
-  return `<div class="page-head"><div class="grow"><span class="eyebrow">${esc(longDate(day))}</span><h1>${T("Worklist")}</h1></div>
-      <div class="day-nav"><a class="btn small" href="${link("day", addDays(day, -1))}" aria-label="${T("Previous")}">${LANG === "ar" ? "›" : "‹"}</a>
-      <input type="date" value="${day}" data-change="goDay">
-      <a class="btn small" href="${link("day", addDays(day, 1))}" aria-label="${T("Next")}">${LANG === "ar" ? "‹" : "›"}</a></div>
-      <a class="btn primary" href="#/register">${T("Register patient")}</a></div>
+  // A week strip like a calendar: Saturday to Friday around the chosen day
+  const d0 = new Date(day + "T12:00:00"); const weekStart = addDays(day, -((d0.getDay() + 1) % 7));
+  const week = [...Array(7).keys()].map((k) => addDays(weekStart, k));
+  const dayName = (k) => new Date(k + "T12:00:00").toLocaleDateString(LANG === "ar" ? "ar-IQ" : "en-GB", { weekday: "short" });
+  const paidToday = db.payments.filter((x) => x.day === day).reduce((a, x) => a + x.amount, 0);
+  return `<div class="page-head"><div class="grow"><span class="eyebrow">${esc(longDate(day))}</span><h1>${T("Welcome back, %(name)s", { name: `<bdi>${esc(meName())}</bdi>` })}</h1>
+        <p class="sub">${T("Today's patients, reports waiting and money taken, at a glance.")}</p></div>
+      <a class="btn primary" href="#/register">+ ${T("Register patient")}</a></div>
+    <div class="week no-print">
+      <a class="week-arrow" href="${link("day", addDays(day, -7))}" aria-label="${T("Previous")}">${LANG === "ar" ? "›" : "‹"}</a>
+      ${week.map((k) => `<a class="week-day ${k === day ? "on" : ""} ${k === today() ? "today" : ""}" href="${link("day", k)}"><span>${esc(dayName(k))}</span><b>${+k.slice(8)}</b></a>`).join("")}
+      <a class="week-arrow" href="${link("day", addDays(day, 7))}" aria-label="${T("Next")}">${LANG === "ar" ? "‹" : "›"}</a>
+      <input type="date" value="${day}" data-change="goDay" class="week-date">
+    </div>
     <div class="stats">
-      <div class="card stat"><span class="label">${T("Registered")}</span><span class="value">${liveRows.length}</span></div>
-      <div class="card stat warn"><span class="label">${T("Waiting for report")}</span><span class="value">${liveRows.filter((e) => e.status === "waiting" || e.status === "draft").length}</span></div>
-      <div class="card stat ok"><span class="label">${T("Ready to print")}</span><span class="value">${liveRows.filter((e) => e.status === "final").length}</span></div>
-      <div class="card stat"><span class="label">${T("Printed")}</span><span class="value">${liveRows.filter((e) => e.status === "printed").length}</span></div>
+      <div class="card stat tint-blue"><span class="label">${T("Registered")}</span><span class="value">${liveRows.length}</span></div>
+      <div class="card stat tint-yellow"><span class="label">${T("Waiting for report")}</span><span class="value">${liveRows.filter((e) => e.status === "waiting" || e.status === "draft").length}</span></div>
+      <div class="card stat tint-green"><span class="label">${T("Ready to print")}</span><span class="value">${liveRows.filter((e) => e.status === "final").length}</span></div>
+      <div class="card stat tint-purple"><span class="label">${T("Payments today")}</span><span class="value num">${iqd(paidToday)}</span><span class="sub">${T("Printed")}: ${liveRows.filter((e) => e.status === "printed").length}</span></div>
     </div>
     <section class="card stack">
       <div class="toolbar">
@@ -319,7 +335,17 @@ function pageWorklist(q) {
 }
 
 function examTypeOptions(mod, selected) {
-  return db.examTypes.filter((t) => t.active && t.modality === mod).map((t) => `<option value="${t.id}" ${String(selected) === String(t.id) ? "selected" : ""}>${esc(t.name)}</option>`).join("");
+  return db.examTypes.filter((t) => t.active && t.modality === mod).map((t) => `<option value="${t.id}" ${String(selected) === String(t.id) ? "selected" : ""}>${esc(t.name)}${t.price ? ` — ${iqd(t.price)}` : ""}</option>`).join("");
+}
+
+// Today's patients beside the registration form, like an agenda; refreshed live without touching the form
+function todayList() {
+  const rows = db.exams.filter((e) => e.day === today()).sort((a, b) => b.registeredAt.localeCompare(a.registeredAt));
+  if (!rows.length) return `<div class="empty small">${T("No patients registered today yet.")}</div>`;
+  return `<div class="agenda">${rows.map((e) => `<a class="agenda-item ${e.status}" href="#/exam/${e.id}">
+      <span class="agenda-time num">${fmtTime(e.registeredAt)}</span>
+      <span class="agenda-main"><bdi class="strong">${esc(e.patientName)}</bdi><span class="sub">${esc(e.examName)}${e.contrast ? " · " + T("Contrast") : ""}</span></span>
+      <span class="agenda-end">${statusBadge(e.status)}<span class="sub num">${iqd(net(e))}</span></span></a>`).join("")}</div>`;
 }
 
 function pageRegister(q) {
@@ -328,9 +354,11 @@ function pageRegister(q) {
   const p = pid ? extra.patients.get(String(pid)) : null;
   const doctors = distinct(db.exams.map((e) => e.referringDoctor));
   const techs = distinct(db.exams.map((e) => e.technician));
-  return `<div class="page-head"><div class="grow"><h1>${T("Register patient")}</h1></div></div>
-  <form id="register-form" class="row" autocomplete="off">
-    <section class="card grow stack">
+  const todays = db.exams.filter((e) => e.day === today() && e.status !== "cancelled");
+  return `<div class="page-head"><div class="grow"><span class="eyebrow">${esc(longDate(today()))}</span><h1>${T("Register patient")}</h1></div></div>
+  <div class="row">
+  <form id="register-form" class="grow stack" autocomplete="off">
+    <section class="card stack">
       <h2>${T("Patient")}</h2>
       <input type="hidden" name="patientId" value="${p ? p.id : ""}">
       ${p ? `<div class="notice ok">${T("Returning patient")}: <bdi>${esc(p.name)}</bdi> <a href="#/register" class="btn small">${T("New patient")}</a></div>` : `
@@ -342,38 +370,54 @@ function pageRegister(q) {
         <div class="field"><label for="r-age">${T("Age")}</label><div class="age"><input id="r-age" name="ageValue" type="number" min="0" max="130" inputmode="numeric"><select name="ageUnit">${Object.entries(AGE_UNITS).map(([k, v]) => `<option value="${k}">${T(v[2])}</option>`).join("")}</select></div></div>
         <div class="field"><label for="r-doctor">${T("Referring doctor")}</label><input id="r-doctor" name="referringDoctor" list="doctor-list" dir="auto"><datalist id="doctor-list">${doctors.map((d) => `<option value="${esc(d)}">`).join("")}</datalist></div>
       </div>
-      <h2>${T("Exam")}</h2>
+    </section>
+    <section class="card stack">
+      <h2>${T("Exam and price")}</h2>
       <div class="grid2">
         <div class="field"><label for="r-mod">${T("Modality")}</label><select id="r-mod" name="modality" data-change="regModality">${Object.entries(MODALITIES).map(([k, v]) => `<option value="${k}">${T(v)}</option>`).join("")}</select></div>
-        <div class="field"><label for="r-type">${T("Exam")}</label><select id="r-type" name="examTypeId" data-change="regPrice">${examTypeOptions("MRI")}</select></div>
-        <label class="checkbox"><input type="checkbox" name="contrast" data-change="regPrice"> ${T("With contrast")}</label>
+        <div class="field"><label for="r-type">${T("Exam")}</label><select id="r-type" name="examTypeId" data-change="regExam">${examTypeOptions("MRI")}</select></div>
+        <label class="checkbox"><input type="checkbox" name="contrast" data-change="regExam"> ${T("With contrast")}</label>
         <div class="field"><label for="r-tech">${T("Technician")}</label><input id="r-tech" name="technician" list="tech-list" dir="auto"><datalist id="tech-list">${techs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist></div>
+        <div class="field"><label for="r-price">${T("Price (IQD)")}</label><input id="r-price" name="price" type="number" min="0" step="any" inputmode="numeric" class="price-input" data-input="regPriceTouched">
+          <span class="sub" id="r-listprice"></span></div>
+        <div class="field"><label for="r-disc">${T("Discount")} (${T("IQD")})</label><input id="r-disc" name="discount" type="number" min="0" step="any" value="0" inputmode="numeric" data-input="regPrice"></div>
+        <div class="field wide"><label for="r-reason">${T("Reason for discount")}</label><input id="r-reason" name="discountReason" dir="auto"></div>
         <div class="field wide"><label for="r-notes">${T("Notes")}</label><textarea id="r-notes" name="notes" dir="auto"></textarea></div>
       </div>
     </section>
-    <aside class="card side stack">
+    <section class="card stack pay-card">
       <h2>${T("Payment")}</h2>
-      <div class="money-line"><span class="muted">${T("Price")}</span><span class="num" id="r-price">0</span></div>
-      <div class="field"><label for="r-disc">${T("Discount")} (${T("IQD")})</label><input id="r-disc" name="discount" type="number" min="0" step="any" value="0" inputmode="numeric" data-input="regPrice"></div>
-      <div class="field"><label for="r-reason">${T("Reason for discount")}</label><input id="r-reason" name="discountReason" dir="auto"></div>
-      <div class="money-line total"><strong>${T("To pay")}</strong><strong class="num" id="r-total">0</strong></div>
-      <div class="field"><label for="r-paid">${T("Paid now")} (${T("IQD")})</label><input id="r-paid" name="paidNow" type="number" min="0" step="any" value="0" inputmode="numeric" data-input="regPaidTouched"></div>
-      <div class="sub owed" id="r-owed"></div>
+      <div class="pay-grid">
+        <div class="pay-total"><span class="label">${T("To pay")}</span><strong class="num" id="r-total">0</strong><span class="sub">${T("IQD")}</span></div>
+        <div class="field"><label for="r-paid">${T("Paid now")} (${T("IQD")})</label><input id="r-paid" name="paidNow" type="number" min="0" step="any" value="0" inputmode="numeric" data-input="regPaidTouched"><div class="sub owed" id="r-owed"></div></div>
+      </div>
       <div id="r-error" class="sub error-text"></div>
-      <button class="btn primary" type="submit" name="then" value="receipt">${T("Save and print receipt")}</button>
-      <button class="btn" type="submit" name="then" value="list">${T("Save without receipt")}</button>
-      <span class="sub">${T("Prices come from the price list, which an admin can change.")}</span>
-    </aside>
-  </form>`;
+      <div class="actions"><button class="btn primary" type="submit" name="then" value="receipt">${T("Save and print receipt")}</button>
+        <button class="btn" type="submit" name="then" value="list">${T("Save without receipt")}</button></div>
+    </section>
+  </form>
+  <aside class="side stack today-side">
+    <section class="card stack">
+      <div class="page-head tight"><h2 class="grow">${T("Today's patients")}</h2><span class="count-pill" id="today-count">${todays.length}</span></div>
+      <div id="today-list">${todayList()}</div>
+      <a class="btn small outline" href="#/">${T("Open the worklist")}</a>
+    </section>
+  </aside>
+  </div>`;
 }
 
-function regRecalc() {
+// The price comes from the price list when the exam changes; whatever reception types instead is kept
+function regRecalc(resetPrice) {
   const f = $("#register-form"); if (!f) return;
   const t = byId(db.examTypes, f.examTypeId.value);
-  const price = t ? t.price + (f.contrast.checked ? t.contrastPrice : 0) : 0;
+  const listPrice = t ? t.price + (f.contrast.checked ? t.contrastPrice : 0) : 0;
+  if (resetPrice || !f.dataset.priceTouched) { f.price.value = listPrice; delete f.dataset.priceTouched; }
+  const price = Math.max(0, Number(f.price.value) || 0);
+  $("#r-listprice").innerHTML = f.dataset.priceTouched && price !== listPrice
+    ? `${T("From the price list: %(amount)s", { amount: iqd(listPrice) })} · <a href="#" data-action="regListPrice">${T("Use the list price")}</a>` : "";
   const disc = Math.max(0, Number(f.discount.value) || 0);
   const total = Math.max(0, price - disc);
-  $("#r-price").textContent = iqd(price); $("#r-total").textContent = iqd(total);
+  $("#r-total").textContent = iqd(total);
   if (!f.dataset.paidTouched) f.paidNow.value = total;
   const left = total - (Number(f.paidNow.value) || 0);
   $("#r-owed").textContent = left > 0 ? T("Still owed: %(amount)s IQD", { amount: iqd(left) }) : "";
@@ -474,10 +518,11 @@ function pageExam(id) {
           ${open && owe > 0 ? `<form class="toolbar" data-submit="takePayment" data-id="${e.id}"><input name="amount" type="number" min="1" max="${owe}" step="any" value="${owe}" inputmode="numeric" class="grow-input"><button class="btn primary small" type="submit">${T("Take payment")}</button></form>` : ""}
           ${!paysReady ? `<span class="sub">${T("Loading…")}</span>` : payments.length ? `<table class="list"><thead><tr><th>${T("Receipt")}</th><th>${T("Time")}</th><th class="n">${T("Amount")}</th></tr></thead><tbody>
             ${payments.map((x) => `<tr><td><a href="#/receipt/${x.id}">${x.id}</a>${x.kind === "refund" ? ` <span class="badge cancelled">${T("Refund")}</span>` : ""}<div class="sub"><bdi>${esc(x.by)}</bdi>${x.note ? ` · <bdi>${esc(x.note)}</bdi>` : ""}</div></td><td class="sub num">${fmtDateTime(x.at)}</td><td class="n">${iqd(x.amount)}</td></tr>`).join("")}</tbody></table>` : ""}
-          ${open ? `<details><summary>${T("Change discount")}</summary><form class="stack" data-submit="changeDiscount" data-id="${e.id}">
+          ${open ? `<details><summary>${T("Change price or discount")}</summary><form class="stack" data-submit="changeDiscount" data-id="${e.id}">
+            <div class="field"><label>${T("Price (IQD)")}</label><input name="price" type="number" min="0" step="any" value="${e.price || 0}"></div>
             <div class="field"><label>${T("Discount")} (${T("IQD")})</label><input name="discount" type="number" min="0" step="any" value="${e.discount || 0}"></div>
             <div class="field"><label>${T("Reason for discount")}</label><input name="reason" dir="auto" value="${esc(e.discountReason)}"></div>
-            <button class="btn small" type="submit">${T("Save discount")}</button></form></details>` : ""}
+            <button class="btn small" type="submit">${T("Save")}</button></form></details>` : ""}
           ${paid > 0 ? `<details><summary>${T("Give money back")}</summary><form class="stack" data-submit="refund" data-id="${e.id}">
             <div class="field"><label>${T("Amount")} (${T("IQD")})</label><input name="amount" type="number" min="1" max="${paid}" step="any" value="${paid}"></div>
             <div class="field"><label>${T("Reason")}</label><input name="note" dir="auto" required></div>
@@ -500,7 +545,7 @@ function pageEditor(id) {
   if (!needExam(id)) return loadingCard();
   const e = examById(id); if (!e || e.status === "cancelled") return notFound();
   const p = patientOf(e); const r = e.report || {}; const signed = isSigned(e);
-  const ro = signed || !canWriteReport();
+  const ro = !canWriteReport();
   const tpls = db.templates.filter((t) => t.modality === e.modality)
     .sort((a, b) => (String(a.examTypeId) !== String(e.examTypeId)) - (String(b.examTypeId) !== String(e.examTypeId)) || a.name.localeCompare(b.name));
   const snips = db.snippets.filter((s) => !s.modality || s.modality === e.modality);
@@ -517,8 +562,7 @@ function pageEditor(id) {
     <div class="row">
       <section class="card grow editor-card">
         <div class="head">
-          ${signed ? `<div class="notice ok">${T("Signed by %(name)s on %(when)s.", { name: esc(r.signedBy), when: fmtDateTime(r.signedAt) })}</div>` : ""}
-          ${!signed && !canWriteReport() ? `<div class="notice">${T("Only the doctor or the typist writes the report. You can read it and print it once it is signed.")}</div>` : ""}
+          ${signed ? `<div class="notice ok">${T("Signed by %(name)s on %(when)s.", { name: esc(r.signedBy), when: fmtDateTime(r.signedAt) })} ${T("Changes are still saved.")}</div>` : ""}
           <div class="grid2">
             <div class="field"><label for="ed-title">${T("Report title")}</label><input id="ed-title" class="title-input" style="color:${esc(db.settings.titleColor)}" value="${esc(r.title || "")}" dir="auto" ${roAttr} data-input="dirty" placeholder="${T("e.g. LUMBOSACRAL SPINE MRI WITH MYELOGRAM")}"></div>
             <div class="field"><label for="ed-dir">${T("Report language")}</label><select id="ed-dir" ${ro ? "disabled" : ""} data-change="edDir"><option value="ltr">${T("English (left to right)")}</option><option value="rtl" ${r.direction === "rtl" ? "selected" : ""}>${T("Arabic (right to left)")}</option></select></div>
@@ -532,11 +576,12 @@ function pageEditor(id) {
         </div>
         <div class="imp field"><label for="ed-imp">${T("Impression")}</label><textarea id="ed-imp" dir="auto" ${roAttr} data-input="dirty">${esc(r.impression || "")}</textarea></div>
         <div class="foot">
-          <span class="status" id="ed-status">${r.updatedAt && !signed ? T("Saved by %(name)s at %(when)s", { name: esc(r.updatedBy), when: fmtTime(r.updatedAt) }) : ro ? "" : T("Saves by itself every few seconds while you type.")}</span>
-          ${signed ? `<a class="btn primary" href="#/print/${e.id}">${T("Print")}</a>${isDoctor() ? `<button class="btn" data-action="reopen" data-id="${e.id}">${T("Reopen to change")}</button>` : ""}`
-            : ro ? `<a class="btn outline" href="#/print/${e.id}">${T("Print preview")}</a>`
-            : `<button class="btn" data-action="saveDraft">${T("Save draft")}</button><a class="btn outline" href="#/print/${e.id}">${T("Print preview")}</a>
-               <button class="btn primary" data-action="sign" data-id="${e.id}" ${isDoctor() ? "" : `disabled title="${T("Only the doctor can sign the report.")}"`}>${T("Sign and finish")}</button>`}
+          <span class="status" id="ed-status">${r.updatedAt ? T("Saved by %(name)s at %(when)s", { name: esc(r.updatedBy), when: fmtTime(r.updatedAt) }) : ro ? "" : T("Saves by itself every few seconds while you type.")}</span>
+          ${ro ? `<a class="btn outline" href="#/print/${e.id}">${T("Print preview")}</a>`
+            : `<button class="btn" data-action="saveDraft">${T("Save")}</button>
+               ${signed ? `<a class="btn primary" href="#/print/${e.id}">${T("Print")}</a>`
+                 : `<a class="btn outline" href="#/print/${e.id}">${T("Print preview")}</a>
+                    <button class="btn primary" data-action="sign" data-id="${e.id}" ${isDoctor() ? "" : `disabled title="${T("Only the doctor can sign the report.")}"`}>${T("Sign and finish")}</button>`}`}
         </div>
       </section>
       ${ro ? "" : `<aside class="side stack ed-side">
@@ -609,7 +654,7 @@ function editorContent() {
 async function saveReport(quiet) {
   clearTimeout(autosaveTimer);
   if (!editing || editing.ro || !$("#editor")) return;
-  const e = examById(editing.id); if (!e || isSigned(e)) return;
+  const e = examById(editing.id); if (!e) return;
   const c = editorContent();
   if (!e.report && !c.title && !c.body.trim() && !c.impression) return;
   editing.dirty = false;
@@ -646,11 +691,6 @@ function onExamsChanged() {
     if (box && r?.updatedAt && r.updatedAt !== editing.seen && r.updatedByUid !== uid()) {
       editing.seen = r.updatedAt;
       box.innerHTML = `<div class="notice">${T("%(name)s changed this report at %(time)s. Copy anything you need, then reload the page to see their version.", { name: esc(r.updatedBy), time: fmtTime(r.updatedAt) })}</div>`;
-    }
-    if (box && e && isSigned(e) && !editing.ro) {
-      editing.ro = true; clearTimeout(autosaveTimer);
-      $$("#ed-title, #editor, #ed-imp").forEach((el) => (el.readOnly = true));
-      box.innerHTML = `<div class="notice ok">${T("This report was already signed.")}</div>`;
     }
   }
   liveUpdate();
@@ -973,7 +1013,9 @@ function render(keepScroll) {
   $("#page-css").textContent = $(".sheet") ? PAGE_CSS.report : $(".receipt.roll") ? PAGE_CSS.roll : $(".receipt") ? PAGE_CSS.a5 : "";
   document.title = `${T("Radiology reports")} · ${db.settings.nameEn}`;
   renderBanner();
-  if (parts[0] === "register") regRecalc();
+  if (parts[0] === "register") regRecalc(true);
+  const wk = $(".week"), on = $(".week-day.on");
+  if (wk && on) wk.scrollLeft += on.getBoundingClientRect().left - wk.getBoundingClientRect().left - (wk.clientWidth - on.offsetWidth) / 2;
   if (parts[0] === "report") mountEditor();
   if (paper) fitPaper();
   // Print once: the address drops ?print=1 so a live update of the page does not print again
@@ -1109,6 +1151,7 @@ const actions = {
     await store.deleteDoc("templates", btn.dataset.id);
     toast(T("Template “%(name)s” removed.", { name: t?.name || "" })); go("#/settings?tab=templates");
   },
+  regListPrice() { regRecalc(true); },
   usePatient(btn) { go(`#/register?patient=${btn.dataset.id}`); },
 };
 const changes = {
@@ -1116,14 +1159,15 @@ const changes = {
   cashDay(el) { go("#/cash?day=" + (el.value || today())); },
   filterStatus(el) { const q = new URLSearchParams(location.hash.split("?")[1] || ""); el.value ? q.set("status", el.value) : q.delete("status"); go("#/?" + q); },
   filterText(el) { const q = new URLSearchParams(location.hash.split("?")[1] || ""); el.value ? q.set("q", el.value) : q.delete("q"); go("#/?" + q); },
-  regModality(el) { $("#r-type").innerHTML = examTypeOptions(el.value); regRecalc(); },
-  regPrice() { regRecalc(); },
+  regModality(el) { $("#r-type").innerHTML = examTypeOptions(el.value); regRecalc(true); },
+  regExam() { regRecalc(true); },
   edDir(el) { $(".editor-wrap").dir = el.value === "rtl" ? "rtl" : "ltr"; markDirty(); },
 };
 let findTimer = null, findToken = 0;
 const inputs = {
   regPrice() { regRecalc(); },
   regPaidTouched() { $("#register-form").dataset.paidTouched = "1"; regRecalc(); },
+  regPriceTouched() { $("#register-form").dataset.priceTouched = "1"; regRecalc(); },
   dirty() { markDirty(); },
   // Recent exams are searched in memory (any part of the name); the patients collection by the start of the name, the phone or the ID
   findPatient(el) {
@@ -1171,10 +1215,11 @@ const submits = {
   },
   async changeDiscount(f) {
     const e = examById(f.dataset.id); const d = Number(f.discount.value) || 0; const reason = f.reason.value.trim();
-    if (d > e.price) { alert(T("The discount is more than the price.")); return; }
+    const price = Math.max(0, Number(f.price.value) || 0);
+    if (d > price) { alert(T("The discount is more than the price.")); return; }
     if (d > 0 && !reason) { alert(T("Give a reason for the discount.")); return; }
-    if (e.price - d < paidFor(e)) { alert(T("More has already been paid than the new total. Record a refund first.")); return; }
-    await updateExam(e.id, { discount: d, discountReason: d ? reason : "" }); toast(T("Discount saved.")); render(true);
+    if (price - d < paidFor(e)) { alert(T("More has already been paid than the new total. Record a refund first.")); return; }
+    await updateExam(e.id, { price, discount: d, discountReason: d ? reason : "" }); toast(T("Price and discount saved.")); render(true);
   },
   async exam(f) {
     const e = examById(f.dataset.id); const name = f.name.value.trim().replace(/\s+/g, " ");

@@ -2,10 +2,10 @@ rules_version = '2';
 
 // Paste into Firebase console → Firestore Database → Rules, then Publish.
 // Everything needs a signed-in account whose users/{uid} document has a role:
-//   reception   registers patients, takes payments, prints signed reports
-//   typist      also writes report drafts
-//   radiologist (shown as "Doctor") also signs and reopens reports, and manages settings
-//   admin       manages settings and people, writes drafts, cannot sign
+//   reception   registers patients, takes payments, writes and edits reports, prints
+//   typist      the same as reception
+//   radiologist (shown as "Doctor") also signs reports, and manages settings
+//   admin       manages settings and people, cannot sign
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
@@ -14,7 +14,6 @@ service cloud.firestore {
       return signedIn() && exists(myProfile()) && get(myProfile()).data.get('role', '') in roles;
     }
     function isStaff() { return hasRole(['reception', 'typist', 'radiologist', 'admin']); }
-    function canWrite() { return hasRole(['typist', 'radiologist', 'admin']); }
     function isManager() { return hasRole(['radiologist', 'admin']); }
     function isDoctor() { return hasRole(['radiologist']); }
 
@@ -29,9 +28,9 @@ service cloud.firestore {
       allow read: if isStaff();
       allow write: if isManager();
     }
-    // Quick text: whoever writes reports
+    // Quick text: everyone
     match /settings/snippets {
-      allow write: if canWrite();
+      allow write: if isStaff();
     }
     // Words marked as correct by the spelling help: everyone
     match /settings/dictionary {
@@ -49,21 +48,12 @@ service cloud.firestore {
     }
 
     match /exams/{id} {
-      function before() { return resource.data; }
-      function after() { return request.resource.data; }
-      function changed() { return after().diff(before()).affectedKeys(); }
-      function wasSigned() { return before().status in ['final', 'printed']; }
-
       allow read: if isStaff();
-      allow create: if isStaff() && after().status == 'waiting' && after().report == null;
-      // The doctor may do anything. Everyone else: never signs, never reopens a signed report,
-      // never changes the text of a signed report; reception never changes the report at all.
+      allow create: if isStaff() && request.resource.data.status == 'waiting' && request.resource.data.report == null;
+      // Everyone writes and edits reports, signed ones too; only the doctor marks a report signed (final)
       allow update: if isDoctor() || (isStaff()
-        && after().status in ['waiting', 'draft', 'final', 'printed', 'cancelled']
-        && (after().status != 'final' || before().status == 'final')
-        && (!wasSigned() || after().status in ['final', 'printed'])
-        && (!wasSigned() || !('report' in changed()))
-        && (canWrite() || !('report' in changed())));
+        && request.resource.data.status in ['waiting', 'draft', 'final', 'printed', 'cancelled']
+        && (request.resource.data.status != 'final' || resource.data.status == 'final'));
       allow delete: if false;
     }
 
@@ -75,8 +65,7 @@ service cloud.firestore {
     }
 
     match /templates/{id} {
-      allow read: if isStaff();
-      allow write: if canWrite();
+      allow read, write: if isStaff();
     }
 
     // Report library chunks: uploaded by the doctor or an admin
