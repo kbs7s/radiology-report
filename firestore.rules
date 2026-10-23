@@ -6,6 +6,7 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function isRadiologist() {
       return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'radiologist';
     }
 

@@ -39,7 +39,11 @@ async function start() {
       unwatchList = store.watchReports((list) => { reports = list; renderList(); });
     } catch (err) {
       console.error(err);
-      setStatus(`خطأ: ${err.code || err.message}`);
+      if (err.code === "permission-denied") {
+        setStatus("قواعد Firestore ترفض القراءة. افتح Firestore ← Rules، الصق محتوى firestore.rules، واضغط Publish.");
+      } else {
+        setStatus(`خطأ: ${err.code || err.message}`);
+      }
     }
   });
 }

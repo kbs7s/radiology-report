@@ -69,8 +69,11 @@ async function createFirebaseStore() {
   store.watchReports = (cb) => fs.onSnapshot(
     fs.query(reportsCol, fs.orderBy("updatedAt", "desc"), fs.limit(200)),
     (snap) => cb(snap.docs.map(fromDoc)),
+    (err) => console.error("watchReports", err),
   );
-  store.watchReport = (id, cb) => fs.onSnapshot(fs.doc(db, "reports", id), (d) => d.exists() && cb(fromDoc(d)));
+  store.watchReport = (id, cb) => fs.onSnapshot(fs.doc(db, "reports", id),
+    (d) => d.exists() && cb(fromDoc(d)),
+    (err) => console.error("watchReport", err));
 
   const stamp = () => ({ updatedAt: fs.serverTimestamp(), updatedBy: store.user.uid, updatedByName: store.user.name });
   store.saveReport = async (id, fields) => {
