@@ -7,6 +7,27 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Visible error banner: surfaces any load/runtime error so a blank page never hides the cause -->
+  <div id="fatal" style="display:none;position:fixed;inset:0;z-index:9999;background:#2a0d0d;color:#ffd7d7;
+    font:14px/1.6 monospace;padding:24px;overflow:auto;direction:ltr;white-space:pre-wrap"></div>
+  <script>
+    (function () {
+      var box = document.getElementById("fatal");
+      function show(msg) {
+        box.style.display = "block";
+        box.textContent = "حدث خطأ — صوّر هذه الشاشة وأرسلها:\n\n" + msg +
+          "\n\nإذا تقدر، افتح Console بالمتصفح وصوّر الرسالة الحمراء.";
+      }
+      window.addEventListener("error", function (e) {
+        show((e.message || "error") + (e.filename ? "\n" + e.filename + ":" + e.lineno : ""));
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        var r = e.reason;
+        show("Unhandled: " + (r && (r.stack || r.message || r.code) || r));
+      });
+    })();
+  </script>
+
   <!-- Login -->
   <section id="login-view" class="login" hidden>
     <form id="login-form" class="login-card">

@@ -356,4 +356,12 @@ $("library-files").addEventListener("change", async (e) => {
   }
 });
 
-start().catch((err) => { setStatus("تعذّر تشغيل الموقع"); console.error(err); });
+start().catch((err) => {
+  console.error(err);
+  const box = document.getElementById("fatal");
+  if (box) {
+    box.style.display = "block";
+    box.textContent = "تعذّر تشغيل الموقع — صوّر هذه الشاشة وأرسلها:\n\n" +
+      (err && (err.stack || err.message || err.code) || err);
+  }
+});

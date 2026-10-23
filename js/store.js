@@ -17,14 +17,8 @@ async function createFirebaseStore() {
   ]);
   const app = initializeApp(firebaseConfig);
   const a = auth.getAuth(app);
-  // Offline cache fails on some mobile browsers / private windows; fall back to the default in-memory store
-  let db;
-  try {
-    db = fs.initializeFirestore(app, { localCache: fs.persistentLocalCache() });
-  } catch (err) {
-    console.error("persistent cache unavailable", err);
-    db = fs.getFirestore(app);
-  }
+  // Plain in-memory Firestore: the offline/IndexedDB cache can hang on mobile Safari, and v1 only needs online use
+  const db = fs.getFirestore(app);
   const store = { mode: "firebase", user: null };
 
   store.onAuth = (cb) => auth.onAuthStateChanged(a, async (u) => {
