@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Radiology Report Writer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Login -->
+  <section id="login-view" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <h1>محرر تقارير الأشعة</h1>
+      <label>البريد الإلكتروني <input id="login-email" type="email" autocomplete="username" required dir="ltr"></label>
+      <label>كلمة السر <input id="login-password" type="password" autocomplete="current-password" required dir="ltr"></label>
+      <button type="submit">دخول</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <!-- App -->
+  <div id="app-view" hidden>
+    <header class="topbar">
+      <h1>محرر تقارير الأشعة</h1>
+      <div class="topbar-side">
+        <span id="status" class="status">جارٍ تحميل المكتبة…</span>
+        <label id="upload-library" class="ghost-btn file-btn" hidden>رفع المكتبة
+          <input id="library-files" type="file" accept=".json" multiple hidden>
+        </label>
+        <span id="who" class="who"></span>
+        <button id="signout" type="button" class="ghost-btn">خروج</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <!-- Reports list -->
+      <aside class="list-col panel">
+        <div class="list-head">
+          <button id="new-report" type="button">+ تقرير جديد</button>
+          <input id="search" type="search" placeholder="بحث باسم المريض أو الفحص">
+          <div class="filters" role="group">
+            <button type="button" class="chip active" data-filter="all">الكل</button>
+            <button type="button" class="chip" data-filter="draft">مسودة</button>
+            <button type="button" class="chip" data-filter="approved">معتمد</button>
+          </div>
+        </div>
+        <ul id="reports" class="reports"></ul>
+      </aside>
+
+      <!-- Editor -->
+      <section class="editor-col">
+        <div id="remote-banner" class="banner" hidden>
+          <span id="remote-text"></span>
+          <button id="remote-load" type="button" class="mini">اعرض النسخة الجديدة</button>
+        </div>
+
+        <div class="patient panel">
+          <label>اسم المريض <input id="f-patient" type="text"></label>
+          <label>العمر <input id="f-age" type="text" inputmode="numeric"></label>
+          <label>الجنس
+            <select id="f-sex"><option value=""></option><option value="Male">Male</option><option value="Female">Female</option></select>
+          </label>
+          <label>تاريخ الفحص <input id="f-date" type="date"></label>
+          <label>الطبيب المحيل <input id="f-doctor" type="text"></label>
+        </div>
+
+        <div class="toolbar">
+          <label>نوع الفحص <select id="modality"></select></label>
+          <label>المنطقة <select id="region"></select></label>
+          <button id="template" type="button" class="ghost-btn">ابدأ بقالب</button>
+          <span class="spacer"></span>
+          <span id="save-state" class="save-state"></span>
+          <span id="badge" class="badge"></span>
+          <button id="approve" type="button" hidden>اعتماد التقرير</button>
+          <button id="reopen" type="button" class="ghost-btn" hidden>إلغاء الاعتماد</button>
+          <button id="pdf" type="button" class="ghost-btn">حفظ PDF</button>
+        </div>
+
+        <div class="editor-wrap" dir="ltr">
+          <div id="mirror" class="editor mirror" aria-hidden="true"></div>
+          <textarea id="editor" class="editor" spellcheck="false" autocomplete="off"
+            placeholder="Start typing the report… (Tab accepts the grey suggestion)"></textarea>
+        </div>
+        <p class="hint">اضغط <kbd>Tab</kbd> لقبول الاقتراح الرمادي، و<kbd>Esc</kbd> لإخفائه. على الموبايل اضغط على الجملة من القائمة.</p>
+      </section>
+
+      <!-- Suggestions -->
+      <aside class="side-col">
+        <section class="panel">
+          <h2>الجمل المقترحة</h2>
+          <ul id="suggestions" class="list" dir="ltr"></ul>
+        </section>
+        <section class="panel">
+          <h2>تصحيح الكلمات</h2>
+          <ul id="spelling" class="list" dir="ltr"></ul>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div id="pdf-host" aria-hidden="true"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

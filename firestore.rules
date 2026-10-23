@@ -1,0 +1,41 @@
+rules_version = '2';
+
+// Paste into Firebase console → Firestore Database → Rules, then Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isRadiologist() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'radiologist';
+    }
+
+    // User profiles {name, role} are created by hand in the console
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /reports/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.status == 'draft'
+        && request.resource.data.createdBy == request.auth.uid;
+      // Drafts can be edited by any user; approving, un-approving and editing approved reports is radiologist-only
+      allow update: if signedIn() && (
+        isRadiologist() ||
+        (resource.data.status == 'draft' && request.resource.data.status == 'draft')
+      );
+      allow delete: if isRadiologist();
+    }
+
+    // Report library chunks: read by everyone signed in, uploaded by the radiologist
+    match /library/{doc} {
+      allow read: if signedIn();
+      allow write: if isRadiologist();
+    }
+
+    // Shared dictionary of words marked as correct
+    match /settings/{doc} {
+      allow read, write: if signedIn();
+    }
+  }
+}

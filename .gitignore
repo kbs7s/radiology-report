@@ -1,0 +1,5 @@
+data/
+tools/access-export/lib/
+tools/access-export/classes/
+tools/access-export/*.jsonl
+*.accdb
