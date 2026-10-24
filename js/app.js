@@ -83,6 +83,7 @@ function textToHtml(text) {
 let store = null;
 const db = {
   settings: { ...SETTINGS }, letterhead: {}, examTypes: EXAM_TYPES, snippets: SNIPPETS, templates: [], people: [], learned: new Map(),
+  names: { doctors: [], technicians: [] },
   exams: [], payments: [],
 };
 const live = { exams: new Map(), payments: new Map() };                       // window listeners
@@ -119,6 +120,12 @@ const canManage = () => role() === "admin" || role() === "radiologist";
 const canWriteReport = () => !!ROLES[role()];
 const distinct = (values) => [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
 const newestFirst = (a, b) => b.registeredAt.localeCompare(a.registeredAt);
+// Referring doctors and technicians are picked from the lists kept in Settings; a name an exam already has stays choosable
+function nameSelect(attrs, list, current, extra = "") {
+  const names = current && !list.includes(current) ? [...list, current] : list;
+  return `<select ${attrs} dir="auto" ${extra}><option value=""></option>${names.map((n) => `<option ${n === current ? "selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+}
+const namesHint = (list) => list.length ? "" : `<span class="sub">${canManage() ? `<a href="#/settings?tab=names">${T("Add the names in Settings")}</a>` : T("The doctor or an admin adds the names in Settings.")}</span>`;
 
 // Exams older than the live window have no listener, so a change to one is read back by hand
 async function refreshExam(id) {
@@ -175,6 +182,7 @@ function startListeners() {
     store.watchDoc("settings", "letterhead", (d) => { db.letterhead = d || {}; liveUpdate(); }, fail),
     store.watchDoc("settings", "examTypes", (d) => { db.examTypes = d?.items || EXAM_TYPES; liveUpdate(); }, fail),
     store.watchDoc("settings", "snippets", (d) => { db.snippets = d?.items || SNIPPETS; liveUpdate(); }, fail),
+    store.watchDoc("settings", "names", (d) => { db.names = { doctors: d?.doctors || [], technicians: d?.technicians || [] }; liveUpdate(); }, fail),
     store.watchQuery("templates", {}, (rows) => {
       db.templates = rows.length ? rows.map((r) => ({ ...r, id: r._id })) : TEMPLATES;
       // The program's ready-made templates are written once, so they can be edited like any other
@@ -368,8 +376,6 @@ function pageRegister(q) {
   const pid = q.get("patient") || "";
   if (pid && !needPatient(pid)) return loadingCard();
   const p = pid ? extra.patients.get(String(pid)) : null;
-  const doctors = distinct(db.exams.map((e) => e.referringDoctor));
-  const techs = distinct(db.exams.map((e) => e.technician));
   const todays = db.exams.filter((e) => e.day === today() && e.status !== "cancelled");
   return `<div class="page-head"><div class="grow"><span class="eyebrow">${esc(longDate(today()))}</span><h1>${T("Register patient")}</h1></div></div>
   <div class="row">
@@ -384,7 +390,7 @@ function pageRegister(q) {
         <div class="field"><label for="r-sex">${T("Sex")}</label><select id="r-sex" name="sex"><option value=""></option><option value="M" ${p?.sex === "M" ? "selected" : ""}>${T("Male")}</option><option value="F" ${p?.sex === "F" ? "selected" : ""}>${T("Female")}</option></select></div>
         <div class="field"><label for="r-phone">${T("Phone")}</label><input id="r-phone" name="phone" type="tel" dir="ltr" value="${esc(p?.phone || "")}"></div>
         <div class="field"><label for="r-age">${T("Age")}</label><div class="age"><input id="r-age" name="ageValue" type="number" min="0" max="130" inputmode="numeric"><select name="ageUnit">${Object.entries(AGE_UNITS).map(([k, v]) => `<option value="${k}">${T(v[2])}</option>`).join("")}</select></div></div>
-        <div class="field"><label for="r-doctor">${T("Referring doctor")}</label><input id="r-doctor" name="referringDoctor" list="doctor-list" dir="auto"><datalist id="doctor-list">${doctors.map((d) => `<option value="${esc(d)}">`).join("")}</datalist></div>
+        <div class="field"><label for="r-doctor">${T("Referring doctor")}</label>${nameSelect(`id="r-doctor" name="referringDoctor"`, db.names.doctors, "")}${namesHint(db.names.doctors)}</div>
       </div>
     </section>
     <section class="card stack">
@@ -393,7 +399,7 @@ function pageRegister(q) {
         <div class="field"><label for="r-mod">${T("Modality")}</label><select id="r-mod" name="modality" data-change="regModality">${Object.entries(MODALITIES).map(([k, v]) => `<option value="${k}">${T(v)}</option>`).join("")}</select></div>
         <div class="field"><label for="r-type">${T("Exam")}</label><select id="r-type" name="examTypeId" data-change="regExam">${examTypeOptions("MRI")}</select></div>
         <label class="checkbox"><input type="checkbox" name="contrast" data-change="regExam"> ${T("With contrast")}</label>
-        <div class="field"><label for="r-tech">${T("Technician")}</label><input id="r-tech" name="technician" list="tech-list" dir="auto"><datalist id="tech-list">${techs.map((d) => `<option value="${esc(d)}">`).join("")}</datalist></div>
+        <div class="field"><label for="r-tech">${T("Technician")}</label>${nameSelect(`id="r-tech" name="technician"`, db.names.technicians, "")}${namesHint(db.names.technicians)}</div>
         <div class="field"><label for="r-price">${T("Price (IQD)")}</label><input id="r-price" name="price" type="number" min="0" step="any" inputmode="numeric" class="price-input" data-input="regPriceTouched">
           <span class="sub" id="r-listprice"></span></div>
         <div class="field"><label for="r-disc">${T("Discount")} (${T("IQD")})</label><input id="r-disc" name="discount" type="number" min="0" step="any" value="0" inputmode="numeric" data-input="regPrice"></div>
@@ -515,8 +521,8 @@ function pageExam(id) {
             <div class="field"><label>${T("Sex")}</label><select name="sex" ${dis}><option value=""></option><option value="M" ${e.sex === "M" ? "selected" : ""}>${T("Male")}</option><option value="F" ${e.sex === "F" ? "selected" : ""}>${T("Female")}</option></select></div>
             <div class="field"><label>${T("Phone")}</label><input name="phone" type="tel" dir="ltr" value="${esc(e.phone)}" ${dis}></div>
             <div class="field"><label>${T("Age")}</label><div class="age"><input name="ageValue" type="number" min="0" value="${e.ageValue ?? ""}" ${dis}><select name="ageUnit" ${dis}>${Object.entries(AGE_UNITS).map(([k, v]) => `<option value="${k}" ${e.ageUnit === k ? "selected" : ""}>${T(v[2])}</option>`).join("")}</select></div></div>
-            <div class="field"><label>${T("Referring doctor")}</label><input name="referringDoctor" dir="auto" value="${esc(e.referringDoctor)}" ${dis}></div>
-            <div class="field"><label>${T("Technician")}</label><input name="technician" dir="auto" value="${esc(e.technician)}" ${dis}></div>
+            <div class="field"><label>${T("Referring doctor")}</label>${nameSelect(`name="referringDoctor"`, db.names.doctors, e.referringDoctor || "", dis)}</div>
+            <div class="field"><label>${T("Technician")}</label>${nameSelect(`name="technician"`, db.names.technicians, e.technician || "", dis)}</div>
             <div class="field wide"><label>${T("Notes")}</label><textarea name="notes" dir="auto" ${dis}>${esc(e.notes)}</textarea></div>
           </div>
           ${open ? `<div class="actions"><button class="btn primary" type="submit">${T("Save changes")}</button>
@@ -971,7 +977,7 @@ function downloadCsv(from, to) {
 function pageSettings(q) {
   const s = db.settings;
   const tabs = [["clinic", "Clinic", canManage], ["people", "People", canManage], ["prices", "Exam types and prices", canManage],
-    ["templates", "Templates", canWriteReport], ["snippets", "Quick text", canWriteReport], ["library", "Library", canManage]].filter(([, , ok]) => ok());
+    ["names", "Doctors and technicians", canManage], ["templates", "Templates", canWriteReport], ["snippets", "Quick text", canWriteReport], ["library", "Library", canManage]].filter(([, , ok]) => ok());
   if (!tabs.length) return `<section class="card"><div class="empty">${T("Only an admin or the doctor can change these settings.")}</div></section>`;
   const tab = tabs.some(([k]) => k === q.get("tab")) ? q.get("tab") : tabs[0][0];
   let body = "";
@@ -1008,6 +1014,14 @@ function pageSettings(q) {
     body = t ? templateForm(t) : `<section class="card stack"><p class="muted flush">${T("Normal findings for each exam, ready to edit in the report.")}</p><div class="actions"><a class="btn primary" href="#/settings?tab=templates&edit=new">${T("New template")}</a></div>
       <div class="table-wrap"><table class="list"><thead><tr><th>${T("Name")}</th><th>${T("Modality")}</th><th>${T("Exam")}</th><th></th></tr></thead><tbody>
       ${db.templates.slice().sort((a, b) => a.modality.localeCompare(b.modality) || a.name.localeCompare(b.name)).map((x) => `<tr><td>${esc(x.name)}</td><td>${T(MODALITIES[x.modality])}</td><td class="sub">${esc(byId(db.examTypes, x.examTypeId)?.name || "—")}</td><td class="end"><a href="#/settings?tab=templates&edit=${esc(x.id)}">${T("Edit")}</a></td></tr>`).join("")}</tbody></table></div></section>`;
+  }
+  if (tab === "names") {
+    // Before the first save, offer the names already written on exams
+    const start = (k, field) => db.names[k].length ? db.names[k] : distinct(db.exams.map((e) => e[field]));
+    body = `<form class="card stack" data-submit="saveNames"><p class="muted flush">${T("One name per line. They show as drop-down lists when registering a patient.")}</p>
+      <div class="grid2"><div class="field"><label for="n-doctors">${T("Referring doctors")}</label><textarea id="n-doctors" name="doctors" rows="12" dir="auto">${esc(start("doctors", "referringDoctor").join("\n"))}</textarea></div>
+      <div class="field"><label for="n-techs">${T("Technicians")}</label><textarea id="n-techs" name="technicians" rows="12" dir="auto">${esc(start("technicians", "technician").join("\n"))}</textarea></div></div>
+      <div class="actions"><button class="btn primary" type="submit">${T("Save")}</button></div></form>`;
   }
   if (tab === "snippets") body = `<form class="card stack" data-submit="saveSnippets"><p class="muted flush">${T("One sentence per line. They show beside the report editor for that modality; the last box is for every modality.")}</p>
       <div class="grid2">${[...Object.keys(MODALITIES), ""].map((m) => `<div class="field"><label>${m ? T(MODALITIES[m]) : T("Every modality")}</label><textarea name="snip-${m}" rows="5" dir="auto">${esc(db.snippets.filter((s2) => s2.modality === m).map((s2) => s2.text).join("\n"))}</textarea></div>`).join("")}</div>
@@ -1352,6 +1366,10 @@ const submits = {
     const id = f.dataset.id || `t${Date.now().toString(36)}`;
     background(store.setDoc("templates", id, { ...data, id }, true));
     go("#/settings?tab=templates"); toast(T("Template saved."));
+  },
+  saveNames(f) {
+    const lines = (t) => [...new Set(t.value.split("\n").map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean))];
+    background(store.setDoc("settings", "names", { doctors: lines(f.doctors), technicians: lines(f.technicians) })); toast(T("Saved.")); render(true);
   },
   saveSnippets(f) {
     const items = [];
