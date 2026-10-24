@@ -1,6 +1,7 @@
 // Data access: Firebase (Auth + Firestore) when configured, otherwise a browser-only demo store.
 // Both offer the same small document API, so the app never talks to Firestore directly:
-//   watchDoc / watchQuery (live), getDoc / getQuery (once), setDoc / updateDoc / deleteDoc, tx (transaction).
+//   watchDoc / watchQuery (live), getDoc / getQuery (once), setDoc / updateDoc / deleteDoc, tx (transaction),
+//   increment(n) as a field value that adds n on the server without reading the document first.
 // A query is { where: [[field, op, value], …], limit } with op one of "==", ">=", "<=".
 import { firebaseConfig } from "../firebase-config.js";
 
@@ -68,9 +69,11 @@ async function createFirebaseStore() {
   store.setDoc = (col, id, data, merge = false) => fs.setDoc(ref(col, id), data, { merge });
   store.updateDoc = (col, id, patch) => fs.updateDoc(ref(col, id), patch);
   store.deleteDoc = (col, id) => fs.deleteDoc(ref(col, id));
+  store.increment = (n) => fs.increment(n);
+  // Each t.get is a trip to the server, so transactions read as little as they can
   store.tx = (fn) => fs.runTransaction(db, (t) => fn({
     get: async (col, id) => { const d = await t.get(ref(col, id)); return d.exists() ? d.data() : null; },
-    set: (col, id, data) => t.set(ref(col, id), data),
+    set: (col, id, data, merge = false) => t.set(ref(col, id), data, { merge }),
     update: (col, id, patch) => t.update(ref(col, id), patch),
   }));
 
@@ -127,7 +130,8 @@ function createDemoStore() {
       const path = k.split(".");
       let o = doc;
       path.slice(0, -1).forEach((p) => (o = o[p] = o[p] && typeof o[p] === "object" ? o[p] : {}));
-      o[path[path.length - 1]] = clone(v ?? null);
+      const last = path[path.length - 1];
+      o[last] = v && v.__inc !== undefined ? (Number(o[last]) || 0) + v.__inc : clone(v ?? null);
     }
   };
 
@@ -162,10 +166,11 @@ function createDemoStore() {
       patchInto(col(c)[id], patch); emit();
     },
     deleteDoc: async (c, id) => { delete col(c)[id]; emit(); },
+    increment: (n) => ({ __inc: n }),
     async tx(fn) {
       const out = await fn({
         get: async (c, id) => (col(c)[id] ? clone(col(c)[id]) : null),
-        set: (c, id, d) => { col(c)[id] = clone(d); },
+        set: (c, id, d, merge = false) => { col(c)[id] = merge ? { ...(col(c)[id] || {}), ...clone(d) } : clone(d); },
         update: (c, id, patch) => patchInto(col(c)[id], patch),
       });
       emit();

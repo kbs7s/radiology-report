@@ -126,20 +126,35 @@ async function refreshExam(id) {
   const e = await store.getDoc("exams", id);
   if (e) { extra.exams.set(e._id, e); rebuild(); liveUpdate(); }
 }
-async function updateExam(id, patch) {
-  await store.updateDoc("exams", id, patch);
-  refreshExam(id).catch(console.error);
+// The page shows a change straight away and the server confirms it later: Firestore hands a write to the
+// listeners at once, and its promise only waits for the server. A write the server refuses comes back as a message.
+function background(p) {
+  Promise.resolve(p).catch((err) => { console.error(err); toast(T("Not saved: %(error)s", { error: err.code || err.message })); });
+}
+// "report.body" style keys, like Firestore's own update
+function patchLocal(doc, patch) {
+  for (const [k, v] of Object.entries(patch)) {
+    const path = k.split(".");
+    let o = doc;
+    path.slice(0, -1).forEach((x) => (o = o[x] = o[x] && typeof o[x] === "object" ? o[x] : {}));
+    o[path[path.length - 1]] = v ?? null;
+  }
+}
+function updateExam(id, patch) {
+  const old = live.exams.get(String(id)) || extra.exams.get(String(id));
+  if (old) patchLocal(old, patch);
+  return store.updateDoc("exams", id, patch).then(() => refreshExam(id).catch(console.error));
 }
 
+// A receipt needs its number, so this waits for the server; it reads only the counters
 async function addPayment(exam, amount, kind, note, patch = {}) {
   const id = await store.tx(async (t) => {
     const c = (await t.get("meta", "counters")) || {};
-    const e = await t.get("exams", exam.id);
     const id = c.payment || 1; c.payment = id + 1;
     const at = nowIso();
     t.set("meta", "counters", c);
-    t.set("payments", id, { id, examId: e.id, kind, amount, note: note || "", by: meName(), byUid: uid(), at, day: dayKey(at), patientName: e.patientName, examName: e.examName });
-    t.update("exams", exam.id, { paid: (e.paid || 0) + amount, ...patch });
+    t.set("payments", id, { id, examId: exam.id, kind, amount, note: note || "", by: meName(), byUid: uid(), at, day: dayKey(at), patientName: exam.patientName, examName: exam.examName });
+    t.update("exams", exam.id, { paid: store.increment(amount), ...patch });
     return id;
   });
   refreshExam(exam.id).catch(console.error);
@@ -442,14 +457,13 @@ async function submitRegister(form, then) {
   try {
     const { eid, payId } = await store.tx(async (t) => {
       const c = (await t.get("meta", "counters")) || {};
-      const old = pid0 ? await t.get("patients", pid0) : null;
-      const pid = old ? old.id : (c.patient || 1);
-      if (!old) c.patient = pid + 1;
+      const pid = pid0 ? Number(pid0) : (c.patient || 1);
+      if (!pid0) c.patient = pid + 1;
       const id = c.exam || 1; c.exam = id + 1;
       const pay = paid > 0 ? (c.payment || 1) : null;
       if (pay) c.payment = pay + 1;
       t.set("meta", "counters", c);
-      t.set("patients", pid, { id: pid, name, nameLower: name.toLowerCase(), sex, phone, createdAt: old?.createdAt || at, updatedAt: at });
+      t.set("patients", pid, { id: pid, name, nameLower: name.toLowerCase(), sex, phone, ...(pid0 ? {} : { createdAt: at }), updatedAt: at }, true);
       t.set("exams", id, {
         id, patientId: pid, patientName: name, patientNameLower: name.toLowerCase(), sex, phone,
         registeredAt: at, day: dayKey(at), modality: type.modality, examTypeId: type.id, examName: type.name,
@@ -736,10 +750,10 @@ async function saveReport(quiet) {
   if (e.status === "waiting") patch.status = "draft";
   editing.seen = at;
   const ed = editing;
+  if (!quiet) toast(T("Saved."));
   try {
     await updateExam(e.id, patch);
     const st = $("#ed-status"); if (st && ed === editing) st.textContent = T("Saved at %(time)s", { time: fmtTime(at) });
-    if (!quiet) toast(T("Saved."));
   } catch (err) {
     console.error(err);
     ed.dirty = true;
@@ -1163,31 +1177,25 @@ const actions = {
     const e = examById(btn.dataset.id); const paid = paidFor(e);
     if (!confirm(paid ? T("Cancel this exam? The %(amount)s IQD paid will be recorded as given back to the patient.", { amount: iqd(paid) }) : T("Cancel this exam? It stays in the search, marked cancelled."))) return;
     if (paid > 0) await addPayment(e, -paid, "refund", T("Exam cancelled"), { status: "cancelled" });
-    else await updateExam(e.id, { status: "cancelled" });
+    else background(updateExam(e.id, { status: "cancelled" }));
     toast(T("The exam was cancelled. It stays in the search, marked cancelled.")); render(true);
   },
   saveDraft() { if (editing) { editing.dirty = true; saveReport(false); } },
-  async sign(btn) {
+  sign(btn) {
     if (!isDoctor() || !editing) return;
     const e = examById(btn.dataset.id); const c = editorContent();
     if (!c.title && !c.body.trim()) { alert(T("Write the report before signing.")); return; }
     clearTimeout(autosaveTimer);
     const at = nowIso();
-    btn.disabled = true;
-    try {
-      await updateExam(e.id, {
-        report: { ...(e.report || {}), ...c, updatedAt: at, updatedBy: meName(), updatedByUid: uid(), signedBy: meName(), signedByUid: uid(), signedAt: at },
-        status: "final",
-      });
-      editing = null; toast(T("Signed. The report is ready to print.")); go(`#/print/${e.id}`);
-      learnReport(examById(e.id)).catch(console.error);
-    } catch (err) {
-      btn.disabled = false; toast(T("Not saved: %(error)s", { error: err.code || err.message }));
-    }
+    const report = { ...(e.report || {}), ...c, updatedAt: at, updatedBy: meName(), updatedByUid: uid(), signedBy: meName(), signedByUid: uid(), signedAt: at };
+    const saved = updateExam(e.id, { report, status: "final" });
+    background(saved);
+    saved.then(() => learnReport({ ...e, report })).catch(console.error);
+    editing = null; toast(T("Signed. The report is ready to print.")); go(`#/print/${e.id}`);
   },
-  async reopen(btn) {
+  reopen(btn) {
     if (!confirm(T("Reopen this signed report to change it? It must be signed again."))) return;
-    await updateExam(btn.dataset.id, { status: "draft", "report.signedAt": null, "report.signedBy": null, "report.signedByUid": null });
+    background(updateExam(btn.dataset.id, { status: "draft", "report.signedAt": null, "report.signedBy": null, "report.signedByUid": null }));
     toast(T("Reopened. Sign it again when you have finished the changes.")); render();
   },
   useTemplate(btn) {
@@ -1203,25 +1211,25 @@ const actions = {
     const ta = $("#editor"); const before = ta.value.slice(0, ta.selectionStart);
     editing.engine.insert((before && !/\s$/.test(before) ? " " : "") + btn.dataset.text);
   },
-  async saveAsTemplate() {
+  saveAsTemplate() {
     const name = $("#tpl-name").value.trim(); if (!name) { alert(T("Give the template a name.")); return; }
     const e = examById(editing.id); const c = editorContent();
     const id = `t${Date.now().toString(36)}`;
-    await store.setDoc("templates", id, { id, modality: e.modality, examTypeId: e.examTypeId, name, ...c, owner: uid() });
+    background(store.setDoc("templates", id, { id, modality: e.modality, examTypeId: e.examTypeId, name, ...c, owner: uid() }));
     toast(T("Saved as template “%(name)s”.", { name }));
     $("#tpl-name").value = "";
   },
   pickImage(btn) { const inp = $("#image-file"); inp.dataset.which = btn.dataset.which; inp.click(); },
-  async resetImage(btn) { await store.setDoc("settings", "letterhead", { [btn.dataset.which]: null }, true); render(true); },
+  resetImage(btn) { background(store.setDoc("settings", "letterhead", { [btn.dataset.which]: null }, true)); render(true); },
   pickLibrary() { $("#library-files").click(); },
-  async deletePerson(btn) {
+  deletePerson(btn) {
     if (btn.dataset.id === uid() || !confirm(T("Remove this person? Reports and payments keep their name."))) return;
-    await store.deleteDoc("users", btn.dataset.id); go("#/settings?tab=people");
+    background(store.deleteDoc("users", btn.dataset.id)); go("#/settings?tab=people");
   },
-  async deleteTemplate(btn) {
+  deleteTemplate(btn) {
     if (!confirm(T("Delete this template?"))) return;
     const t = byId(db.templates, btn.dataset.id);
-    await store.deleteDoc("templates", btn.dataset.id);
+    background(store.deleteDoc("templates", btn.dataset.id));
     toast(T("Template “%(name)s” removed.", { name: t?.name || "" })); go("#/settings?tab=templates");
   },
   regListPrice() { regRecalc(true); },
@@ -1286,31 +1294,31 @@ const submits = {
     if (!f.note.value.trim()) { alert(T("Give a reason.")); return; }
     const id = await addPayment(e, -a, "refund", f.note.value.trim()); go(`#/receipt/${id}`);
   },
-  async changeDiscount(f) {
+  changeDiscount(f) {
     const e = examById(f.dataset.id); const d = Number(f.discount.value) || 0; const reason = f.reason.value.trim();
     const price = Math.max(0, Number(f.price.value) || 0);
     if (d > price) { alert(T("The discount is more than the price.")); return; }
     if (d > 0 && !reason) { alert(T("Give a reason for the discount.")); return; }
     if (price - d < paidFor(e)) { alert(T("More has already been paid than the new total. Record a refund first.")); return; }
-    await updateExam(e.id, { price, discount: d, discountReason: d ? reason : "" }); toast(T("Price and discount saved.")); render(true);
+    background(updateExam(e.id, { price, discount: d, discountReason: d ? reason : "" })); toast(T("Price and discount saved.")); render(true);
   },
-  async exam(f) {
+  exam(f) {
     const e = examById(f.dataset.id); const name = f.name.value.trim().replace(/\s+/g, " ");
     if (!name) { alert(T("Enter the patient's name.")); return; }
     const patient = { name, nameLower: name.toLowerCase(), sex: f.sex.value, phone: f.phone.value.trim() };
-    await updateExam(e.id, {
+    background(updateExam(e.id, {
       patientName: name, patientNameLower: patient.nameLower, sex: patient.sex, phone: patient.phone,
       ageValue: Number(f.ageValue.value) || null, ageUnit: f.ageUnit.value, referringDoctor: f.referringDoctor.value.trim().replace(/\s+/g, " "),
       technician: f.technician.value.trim(), notes: f.notes.value.trim(),
-    });
-    await store.setDoc("patients", e.patientId, { ...patient, updatedAt: nowIso() }, true);
-    extra.patients.delete(String(e.patientId));
+    }));
+    background(store.setDoc("patients", e.patientId, { ...patient, updatedAt: nowIso() }, true));
+    const known = extra.patients.get(String(e.patientId)); if (known) Object.assign(known, patient);
     toast(T("Saved.")); render(true);
   },
   search(f) { const q = new URLSearchParams(); for (const k of ["q", "from", "to", "modality", "status", "doctor"]) if (f[k].value) q.set(k, f[k].value); go("#/search?" + q); },
   statsPeriod(f) { go(`#/stats?from=${f.from.value}&to=${f.to.value}`); },
-  async saveClinic(f) {
-    await store.setDoc("settings", "clinic", { nameEn: f.nameEn.value.trim() || "Radiology", nameAr: f.nameAr.value.trim(), sigTitle: f.sigTitle.value.trim(), sigName: f.sigName.value.trim(), sigDegrees: f.sigDegrees.value.trim(), titleColor: f.titleColor.value, receiptPaper: f.receiptPaper.value }, true);
+  saveClinic(f) {
+    background(store.setDoc("settings", "clinic", { nameEn: f.nameEn.value.trim() || "Radiology", nameAr: f.nameAr.value.trim(), sigTitle: f.sigTitle.value.trim(), sigName: f.sigName.value.trim(), sigDegrees: f.sigDegrees.value.trim(), titleColor: f.titleColor.value, receiptPaper: f.receiptPaper.value }, true));
     toast(T("Saved.")); render(true);
   },
   async savePerson(f) {
@@ -1324,37 +1332,44 @@ const submits = {
         data.email = email;
         toast(T("The account was created. Give the person their email and password."));
       } else toast(T("Saved."));
-      await store.setDoc("users", id, data, true);
+      background(store.setDoc("users", id, data, true));
       go("#/settings?tab=people");
     } catch (err) {
       console.error(err);
       $("#person-error").textContent = T("Could not create the account: %(error)s", { error: err.code || err.message });
     }
   },
-  async savePrices(f) {
+  savePrices(f) {
     const items = db.examTypes.map((t) => ({ ...t, name: f[`name-${t.id}`].value.trim() || t.name, price: Math.max(0, Number(f[`price-${t.id}`].value) || 0), contrastPrice: Math.max(0, Number(f[`cprice-${t.id}`].value) || 0), active: f[`active-${t.id}`].checked }));
     const nn = f.newName.value.trim();
     if (nn) items.push({ id: Math.max(0, ...items.map((t) => t.id)) + 1, modality: f.newModality.value, name: nn, price: 0, contrastPrice: 0, active: true });
-    await store.setDoc("settings", "examTypes", { items });
+    background(store.setDoc("settings", "examTypes", { items }));
     toast(T("Saved.")); render(true);
   },
-  async saveTemplate(f) {
+  saveTemplate(f) {
     const data = { name: f.name.value.trim(), modality: f.modality.value, examTypeId: Number(f.examTypeId.value) || null, direction: f.direction.value, title: f.title.value.trim(), body: f.body.value.replace(/\s+$/, ""), impression: f.impression.value.trim() };
     if (!data.name) return;
     const id = f.dataset.id || `t${Date.now().toString(36)}`;
-    await store.setDoc("templates", id, { ...data, id }, true);
+    background(store.setDoc("templates", id, { ...data, id }, true));
     go("#/settings?tab=templates"); toast(T("Template saved."));
   },
-  async saveSnippets(f) {
+  saveSnippets(f) {
     const items = [];
     for (const m of [...Object.keys(MODALITIES), ""]) for (const line of f[`snip-${m}`].value.split("\n")) if (line.trim()) items.push({ modality: m, text: line.trim() });
-    await store.setDoc("settings", "snippets", { items }); toast(T("Saved.")); render(true);
+    background(store.setDoc("settings", "snippets", { items })); toast(T("Saved.")); render(true);
   },
 };
 
+// A button that waits on the server shows it is working from the moment it is pressed
+function busyWhile(el, p) {
+  if (!el || !p?.finally) return p;
+  el.classList.add("is-busy"); el.setAttribute("aria-busy", "true");
+  if (el.tagName === "BUTTON") el.disabled = true;
+  return p.finally(() => { el.classList.remove("is-busy"); el.removeAttribute("aria-busy"); if (el.tagName === "BUTTON") el.disabled = false; });
+}
 document.addEventListener("click", (ev) => {
   const el = ev.target.closest("[data-action]");
-  if (el && actions[el.dataset.action]) { ev.preventDefault(); actions[el.dataset.action](el, ev); }
+  if (el && actions[el.dataset.action]) { ev.preventDefault(); busyWhile(el, actions[el.dataset.action](el, ev)); }
 });
 document.addEventListener("change", (ev) => { const el = ev.target.closest("[data-change]"); if (el && changes[el.dataset.change]) changes[el.dataset.change](el); });
 document.addEventListener("input", (ev) => {
@@ -1365,16 +1380,17 @@ document.addEventListener("input", (ev) => {
 document.addEventListener("submit", async (ev) => {
   const f = ev.target; ev.preventDefault();
   if (f.id === "login-form") {
-    const btn = $("button[type=submit]", f); btn.disabled = true;
+    const btn = $("button[type=submit]", f); btn.disabled = true; btn.classList.add("is-busy");
     try { await store.signIn($("#login-email").value.trim(), $("#login-password").value); }
-    catch (err) { btn.disabled = false; $("#login-error").textContent = T("Could not sign in. Check the email and password."); }
+    catch (err) { btn.disabled = false; btn.classList.remove("is-busy"); $("#login-error").textContent = T("Could not sign in. Check the email and password."); }
     return;
   }
-  if (f.id === "register-form") return submitRegister(f, ev.submitter?.value);
+  const submitter = ev.submitter || $("button[type=submit]", f);
+  if (f.id === "register-form") return busyWhile(submitter, submitRegister(f, ev.submitter?.value));
   const handler = f.id === "exam-form" ? submits.exam : submits[f.dataset.submit];
   if (!handler) return;
   try {
-    await handler(f);
+    await busyWhile(submitter, handler(f));
     f.removeAttribute("data-dirty");
   } catch (err) {
     console.error(err);

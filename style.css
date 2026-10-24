@@ -68,6 +68,14 @@ html[lang="ar"] .eyebrow { letter-spacing: 0; }
 .btn.danger { border-color: var(--danger); color: var(--danger); }
 .btn.small { min-height: 32px; padding: 0 12px; font-size: 13px; }
 .btn:disabled { opacity: .5; cursor: default; }
+/* Answer a tap at once: no double-tap zoom wait, a visible press, and a spinner while the server is asked */
+.btn, button, a, [data-action] { touch-action: manipulation; }
+.btn { transition: transform .08s ease, background-color .12s ease; }
+.btn:active:not(:disabled) { transform: scale(.97); }
+.btn.is-busy, .btn.is-busy:disabled { opacity: .8; cursor: progress; }
+.btn.is-busy::after { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .btn { transition: none; } .btn.is-busy::after { animation-duration: 2s; } }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field > label, .label { font-size: 12px; font-weight: 700; color: var(--muted); }
